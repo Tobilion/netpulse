@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetPulse — ISP Performance Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --warn: #f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  h1 { font-size: 1.5rem; font-weight: 600; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+  .range-picker { display: flex; gap: 6px; }
+  .range-picker button {
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+  }
+  .range-picker button:hover { color: var(--text); border-color: var(--accent); }
+  .range-picker button.active {
+    background: var(--accent);
+    color: #0d1117;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .stat-card .label {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .stat-card .value { font-size: 1.6rem; font-weight: 700; }
+  .stat-card .value.good { color: var(--accent2); }
+  .stat-card .value.bad { color: var(--warn); }
+  .chart-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+  .chart-card h2 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text);
+  }
+  .chart-wrap { position: relative; height: 300px; }
+  footer { color: var(--muted); font-size: 0.8rem; text-align: center; margin-top: 30px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Net<span>Pulse</span></h1>
+    <div class="subtitle">Real ISP performance, measured over time</div>
+  </div>
+  <div class="range-picker" id="rangePicker">
+    <button data-range="24h">24h</button>
+    <button data-range="7d" class="active">7d</button>
+    <button data-range="30d">30d</button>
+    <button data-range="all">All</button>
+  </div>
+</header>
+
+<section class="stats" id="statCards">
+  <div class="stat-card"><div class="label">Uptime</div><div class="value" id="statUptime">–</div></div>
+  <div class="stat-card"><div class="label">Avg Download</div><div class="value" id="statDown">–</div></div>
+  <div class="stat-card"><div class="label">Avg Upload</div><div class="value" id="statUp">–</div></div>
+  <div class="stat-card"><div class="label">Avg Ping</div><div class="value" id="statPing">–</div></div>
+  <div class="stat-card"><div class="label">Outages</div><div class="value" id="statOutages">–</div></div>
+</section>
+
+<div class="chart-card">
+  <h2>Download / Upload Speed (Mbps)</h2>
+  <div class="chart-wrap"><canvas id="speedChart"></canvas></div>
+</div>
+
+<div class="chart-card">
+  <h2>Latency (ms)</h2>
+  <div class="chart-wrap"><canvas id="latencyChart"></canvas></div>
+</div>
+
+<div class="chart-card">
+  <h2>Average Download Speed by Hour of Day</h2>
+  <div class="chart-wrap"><canvas id="hourlyChart"></canvas></div>
+</div>
+
+<footer>NetPulse — a portfolio project by Tobiloba Jagun</footer>
+
+<script>
+const GRID = 'rgba(139, 148, 158, 0.15)';
+const TICK = '#8b949e';
+Chart.defaults.color = TICK;
+Chart.defaults.borderColor = GRID;
+
+let speedChart, latencyChart, hourlyChart;
+let currentRange = '7d';
+
+const baseLineOpts = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: { legend: { labels: { boxWidth: 12 } } },
+  scales: {
+    x: { ticks: { maxTicksLimit: 12, maxRotation: 0 } },
+    y: { beginAtZero: true }
+  },
+  elements: { point: { radius: 0, hitRadius: 8 }, line: { tension: 0.25 } }
+};
+
+async function loadData(range) {
+  const res = await fetch(`/api/data?range=${range}`);
+  const data = await res.json();
+  render(data);
+}
+
+function fmt(v, suffix) { return v === null || v === undefined ? '–' : `${v}${suffix}`; }
+
+function render(data) {
+  const s = data.stats;
+  const uptimeEl = document.getElementById('statUptime');
+  uptimeEl.textContent = fmt(s.uptime_pct, '%');
+  uptimeEl.className = 'value ' + (s.uptime_pct === null ? '' : s.uptime_pct >= 99 ? 'good' : s.uptime_pct < 95 ? 'bad' : '');
+  document.getElementById('statDown').textContent = fmt(s.avg_download_mbps, ' Mbps');
+  document.getElementById('statUp').textContent = fmt(s.avg_upload_mbps, ' Mbps');
+  document.getElementById('statPing').textContent = fmt(s.avg_ping_ms, ' ms');
+  const outEl = document.getElementById('statOutages');
+  outEl.textContent = s.outage_count;
+  outEl.className = 'value ' + (s.outage_count > 0 ? 'bad' : 'good');
+
+  const labels = data.measurements.map(m => m.timestamp.slice(5, 16));
+
+  speedChart?.destroy();
+  speedChart = new Chart(document.getElementById('speedChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Download', data: data.measurements.map(m => m.download_mbps),
+          borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.1)', fill: true },
+        { label: 'Upload', data: data.measurements.map(m => m.upload_mbps),
+          borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)', fill: true }
+      ]
+    },
+    options: baseLineOpts
+  });
+
+  latencyChart?.destroy();
+  latencyChart = new Chart(document.getElementById('latencyChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Ping 1.1.1.1', data: data.measurements.map(m => m.ping_cloudflare_ms), borderColor: '#d29922' },
+        { label: 'Ping 8.8.8.8', data: data.measurements.map(m => m.ping_google_ms), borderColor: '#bc8cff' }
+      ]
+    },
+    options: baseLineOpts
+  });
+
+  hourlyChart?.destroy();
+  hourlyChart = new Chart(document.getElementById('hourlyChart'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`),
+      datasets: [{
+        label: 'Avg Download (Mbps)',
+        data: data.hourly_avg_download,
+        backgroundColor: 'rgba(88,166,255,0.55)',
+        borderColor: '#58a6ff',
+        borderWidth: 1
+      }]
+    },
+    options: { ...baseLineOpts, plugins: { legend: { display: false } } }
+  });
+}
+
+document.getElementById('rangePicker').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  document.querySelectorAll('.range-picker button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentRange = btn.dataset.range;
+  loadData(currentRange);
+});
+
+loadData(currentRange);
+</script>
+</body>
+</html>
