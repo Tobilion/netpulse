@@ -5,3 +5,5 @@ __pycache__/
 # measurement data stays local
 netpulse.db*
 exports/
+
+CLAUDE.md
