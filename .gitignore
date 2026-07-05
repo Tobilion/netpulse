@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+.env
+# measurement data stays local
+netpulse.db*
+exports/
