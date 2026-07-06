@@ -2,22 +2,25 @@
 
 **Track how your ISP *actually* performs — not what they promise.**
 
-NetPulse logs your internet connection's real performance over time — download/upload speed, latency, packet loss, and outages — into a local SQLite database, and visualizes everything in a clean dark-themed web dashboard.
+NetPulse logs your internet connection's real performance over time — download/upload speed, latency, packet loss, and outages — into a local SQLite database, and visualizes everything in a premium dark-themed web dashboard.
 
-## Screenshots
+## Dashboard
 
-*(placeholder — add screenshots of the dashboard here)*
+The dashboard (`python main.py serve`) features a fully animated, component-rich UI:
 
-## Features
-
-NetPulse runs a full measurement cycle on demand or on a schedule: a speed test via speedtest.net, plus 10 pings each to Cloudflare (1.1.1.1) and Google (8.8.8.8) DNS. If the network is down or the speed test fails, the cycle is recorded as an outage instead of crashing — so gaps in your connection become data, not lost data. The dashboard shows speed and latency over time, uptime percentage, averages, an hour-of-day speed profile (great for spotting evening congestion), and a date-range filter (24h / 7d / 30d / all).
+- **Hero section** — live status headline with a text scramble animation, uptime progress ring, and "last measured N min ago" pill
+- **Stat cards** — animated counters, spotlight glow on hover, 3D cursor tilt
+- **Charts** — Download/upload speed (draws left→right on load), latency over time, and an hourly speed profile (great for spotting evening congestion) — all with gradient fills and dark custom tooltips
+- **Outage log** — red-tinted incident cards; click any to open a detail modal
+- **Empty state** — if the DB has no data, the dashboard explains exactly what to run with a one-click copy button
+- **Time range filter** — 24h / 7d / 30d / All, with an animated sliding pill indicator
 
 ## Setup (Windows)
 
-Requires Python 3.9+. In PowerShell or Command Prompt:
+Requires Python 3.9+. In PowerShell:
 
-```
-cd netpulse
+```powershell
+cd C:\Users\tobil\Desktop\Projects\netpulse
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
@@ -25,30 +28,39 @@ pip install -r requirements.txt
 
 ## Usage
 
-```
-python main.py once                  # run one measurement cycle
-python main.py watch --interval 30   # run a cycle every 30 minutes, forever
-python main.py serve                 # dashboard at http://localhost:5000
-python main.py export                # export all data to CSV
-python main.py demo                  # seed 14 days of fake data (to preview the dashboard)
+```powershell
+# Single measurement cycle (~30–60s)
+python main.py once
+
+# Measure continuously every 30 minutes
+python main.py watch --interval 30
+
+# Open the dashboard at http://localhost:5000
+python main.py serve
+
+# Seed 14 days of realistic demo data (great for previewing the UI)
+python main.py demo
+
+# Export all data to CSV
+python main.py export
 ```
 
-A typical setup: schedule `once` to run every 30 minutes (see below), and open the dashboard whenever you want to check on your ISP.
+A typical setup: use `watch` or Windows Task Scheduler to collect in the background, then open `serve` whenever you want to review your ISP.
 
 ## Scheduling with Windows Task Scheduler
 
-To log measurements automatically every 30 minutes:
+To log measurements automatically every 30 minutes without keeping a terminal open:
 
 1. Press `Win + R`, type `taskschd.msc`, press Enter.
-2. In the right panel, click **Create Task…** (not "Create Basic Task").
-3. **General tab:** name it `NetPulse Logger`. Check **Run whether user is logged on or not** if you want it running in the background.
-4. **Triggers tab:** click **New…** → Begin the task **On a schedule** → **Daily** → under Advanced settings, check **Repeat task every** and set it to **30 minutes** for a duration of **Indefinitely** → OK.
-5. **Actions tab:** click **New…** → Action: **Start a program**.
-   - Program/script: full path to your venv Python, e.g. `C:\Users\you\netpulse\venv\Scripts\python.exe`
-   - Add arguments: `main.py once`
-   - Start in: the full path to the `netpulse` folder, e.g. `C:\Users\you\netpulse`
-6. **Conditions tab:** uncheck **Start the task only if the computer is on AC power** (otherwise it stops on battery).
-7. Click **OK**, enter your Windows password if prompted, and you're done. Right-click the task → **Run** to test it.
+2. Click **Create Task…** in the right panel.
+3. **General tab:** name it `NetPulse Logger`. Check **Run whether user is logged on or not** for true background operation.
+4. **Triggers tab:** New → On a schedule → Daily → Advanced: **Repeat task every 30 minutes**, Duration: **Indefinitely** → OK.
+5. **Actions tab:** New → Start a program.
+   - Program/script: `C:\Users\tobil\Desktop\Projects\netpulse\venv\Scripts\python.exe`
+   - Arguments: `main.py once`
+   - Start in: `C:\Users\tobil\Desktop\Projects\netpulse`
+6. **Conditions tab:** uncheck **Start only if on AC power** (stops on battery otherwise).
+7. Click OK, enter your Windows password if prompted, then right-click the task → **Run** to verify.
 
 ## Project structure
 
@@ -57,18 +69,26 @@ netpulse/
 ├── main.py               # CLI entry point (once / watch / export / demo / serve)
 ├── logger.py             # one measurement cycle: speed test + pings
 ├── db.py                 # SQLite storage layer
-├── dashboard.py          # Flask app + JSON API
+├── dashboard.py          # Flask app + /api/data JSON endpoint
 ├── templates/
-│   └── dashboard.html    # dark-themed dashboard (Chart.js via CDN)
+│   └── dashboard.html    # Lean HTML shell (no inline CSS/JS)
+├── static/
+│   ├── css/
+│   │   ├── main.css      # Design tokens, layout, hero, cards, footer
+│   │   └── components.css # Nav, toast, modal, skeleton, empty state, ring
+│   └── js/
+│       ├── components.js # 13 reusable UI components (ES module)
+│       ├── charts.js     # Chart.js config, gradients, draw animation
+│       └── app.js        # Data fetch, render pipeline, component wiring
 ├── tests/
 │   └── test_db.py        # pytest suite for the db module
 ├── requirements.txt
-└── netpulse.db           # created on first run
+└── netpulse.db           # created on first run (git-ignored)
 ```
 
 ## Running the tests
 
-```
+```powershell
 pip install pytest
 python -m pytest tests/ -v
 ```

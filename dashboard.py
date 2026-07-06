@@ -44,9 +44,13 @@ def api_data():
         round(sum(v) / len(v), 2) if v else None for h, v in sorted(hourly.items())
     ]
 
+    # Most recent measurement timestamp for the "last measured N min ago" hero pill
+    last_measured = measurements[-1]["timestamp"] if measurements else None
+
     return jsonify({
         "stats": stats,
         "measurements": measurements,
         "outages": outages,
         "hourly_avg_download": hourly_avg,
+        "last_measured": last_measured,
     })
