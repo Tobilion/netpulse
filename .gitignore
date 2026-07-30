@@ -7,3 +7,6 @@ netpulse.db*
 exports/
 
 CLAUDE.md
+
+# Local Project Console chat memory (not for git)
+.console/
