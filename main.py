@@ -12,13 +12,34 @@ import argparse
 import csv
 import math
 import random
+import sys
 import time
 from datetime import datetime, timedelta
 
 import db
 
 
+def ensure_speedtest_importable():
+    """Abort with a clear message if the speedtest module is missing.
+
+    Catches the classic wrong-Python mistake (running main.py with the
+    system interpreter instead of venv\\Scripts\\python.exe), which used
+    to silently log every cycle as an outage.
+    """
+    try:
+        import speedtest  # noqa: F401
+    except ModuleNotFoundError:
+        print(
+            "ERROR: no module named 'speedtest'.\n"
+            "You are probably running the system Python instead of the project venv.\n"
+            "Run it like this instead:\n"
+            "    venv\\Scripts\\python.exe main.py watch --interval 5"
+        )
+        sys.exit(1)
+
+
 def cmd_once(_args):
+    ensure_speedtest_importable()
     import logger
 
     print("Running measurement cycle...")
@@ -33,6 +54,7 @@ def cmd_once(_args):
 
 
 def cmd_watch(args):
+    ensure_speedtest_importable()
     import logger
 
     interval_s = args.interval * 60

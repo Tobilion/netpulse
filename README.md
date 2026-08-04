@@ -6,7 +6,7 @@ NetPulse logs your internet connection's real performance over time — download
 
 ## Dashboard
 
-The dashboard (`python main.py serve`) features a fully animated, component-rich UI:
+The dashboard (`venv\Scripts\python.exe main.py serve`) features a fully animated, component-rich UI:
 
 - **Hero section** — live status headline with a text scramble animation, uptime progress ring, and "last measured N min ago" pill
 - **Stat cards** — animated counters, spotlight glow on hover, 3D cursor tilt
@@ -22,27 +22,33 @@ Requires Python 3.9+. In PowerShell:
 ```powershell
 cd C:\Users\tobil\Desktop\Projects\netpulse
 python -m venv venv
-venv\Scripts\activate
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+
+> **Important:** always run NetPulse with the venv interpreter **explicitly**
+> (`venv\Scripts\python.exe main.py ...`). The venv has `speedtest`; the system
+> Python on this machine does not, and `python` alone may resolve to the system
+> one. If `venv\Scripts\activate` doesn't stick (no `(venv)` prompt prefix),
+> don't rely on it — use the full path.
 
 ## Usage
 
 ```powershell
 # Single measurement cycle (~30–60s)
-python main.py once
+venv\Scripts\python.exe main.py once
 
-# Measure continuously every 30 minutes
-python main.py watch --interval 30
+# Measure continuously every N minutes (e.g. 5)
+venv\Scripts\python.exe main.py watch --interval 5
 
 # Open the dashboard at http://localhost:5000
-python main.py serve
+venv\Scripts\python.exe main.py serve
 
 # Seed 14 days of realistic demo data (great for previewing the UI)
-python main.py demo
+venv\Scripts\python.exe main.py demo
 
 # Export all data to CSV
-python main.py export
+venv\Scripts\python.exe main.py export
 ```
 
 A typical setup: use `watch` or Windows Task Scheduler to collect in the background, then open `serve` whenever you want to review your ISP.
@@ -89,8 +95,8 @@ netpulse/
 ## Running the tests
 
 ```powershell
-pip install pytest
-python -m pytest tests/ -v
+venv\Scripts\pip.exe install pytest
+venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
 ## Why I built this
