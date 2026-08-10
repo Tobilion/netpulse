@@ -18,7 +18,7 @@
       "action": "venv\\Scripts\\python.exe main.py demo",
       "requires": ["venv/Scripts/python.exe"],
       "requiresMessage": "NetPulse needs its virtual environment set up first: run `python -m venv venv`, then `venv\\Scripts\\python.exe -m pip install -r requirements.txt`." },
-    { "triggers": ["watch network", "track network speed", "monitor network", "watch network at interval", "run network speed test on a loop", "keep checking the network"],
+    { "triggers": ["watch network", "track network speed", "monitor network", "watch network at interval", "run network speed test on a loop", "keep checking the network", "measure at interval", "measure at intervals", "measure every", "measure network at interval", "measure the network at intervals", "check at interval", "check at intervals", "check every", "measure on a schedule", "run measurements at intervals"],
       "type": "command", "action": "venv\\Scripts\\python.exe main.py watch --interval {interval}",
       "requires": ["venv/Scripts/python.exe"],
       "requiresMessage": "NetPulse needs its virtual environment set up first: run `python -m venv venv`, then `venv\\Scripts\\python.exe -m pip install -r requirements.txt`.",
