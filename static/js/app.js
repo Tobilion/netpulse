@@ -19,6 +19,8 @@ import {
   initModal,
 } from './components.js';
 
+import { SpeedTestGauge } from './speedtest.js';
+
 import {
   destroyCharts,
   buildSpeedChart,
@@ -30,6 +32,12 @@ import {
 let currentRange   = '7d';
 let heroScrambled  = false;
 
+// How often the "last measured" pill silently re-checks the API. Deliberately
+// lighter than a full re-render: re-rendering every minute would restart the
+// stat-card counters and replay the fade-up animations, so we only refresh the
+// hero pill. Charts/stat cards update on range change or a manual speed test.
+const PILL_POLL_MS = 60_000;
+
 /* ── FORMATTERS ─────────────────────────────────────── */
 function fmt(v, suffix = '') {
   return (v === null || v === undefined) ? '–' : `${v}${suffix}`;
@@ -37,7 +45,9 @@ function fmt(v, suffix = '') {
 
 function timeAgo(isoStr) {
   if (!isoStr) return 'never';
-  const then = new Date(isoStr.replace(' ', 'T') + (isoStr.includes('T') ? '' : 'Z'));
+  // DB timestamps are local wall-clock time with no zone marker; parse as local
+  // time (no 'Z') or the pill shows a fixed offset for timezones behind UTC.
+  const then = new Date(isoStr.replace(' ', 'T'));
   const mins = Math.round((Date.now() - then.getTime()) / 60_000);
   if (isNaN(mins))    return 'unknown';
   if (mins < 2)       return 'just now';
@@ -237,13 +247,29 @@ async function loadData(range) {
   showStatSkeletons(document.getElementById('statsGrid'), 5);
 
   try {
-    const res = await fetch(`/api/data?range=${encodeURIComponent(range)}`);
+    const res = await fetch(`/api/data?range=${encodeURIComponent(range)}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
     const data = await res.json();
     render(data);
   } catch (err) {
     console.error('[NetPulse] Data load error:', err);
     showToast('error', err.message || 'Failed to load data — is the server running?');
+  }
+}
+
+// Silent background refresh: updates only the "last measured N ago" pill so the
+// dashboard stays live without the visual churn of a full re-render.
+async function refreshPill() {
+  try {
+    const res = await fetch(`/api/data?range=${encodeURIComponent(currentRange)}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const pill = document.getElementById('lastMeasuredPill');
+    if (pill && data.last_measured) {
+      pill.innerHTML = `<span class="pulse-dot"></span> last measured ${timeAgo(data.last_measured)}`;
+    }
+  } catch (err) {
+    // Transient network/error — the next tick will retry.
   }
 }
 
@@ -267,8 +293,20 @@ function init() {
     initMagneticButtons();
   }
 
+  // Live speed test gauge — refreshes the dashboard when a test lands in the DB
+  const gaugeMount = document.getElementById('liveTestMount');
+  if (gaugeMount) {
+    const gauge = new SpeedTestGauge(gaugeMount, { onComplete: () => loadData(currentRange) });
+    gauge.render();
+    initSpotlightCards();
+    initMagneticButtons();
+  }
+
   // Initial fetch
   loadData(currentRange);
+
+  // Keep the "last measured" pill live while the tab stays open
+  setInterval(refreshPill, PILL_POLL_MS);
 }
 
 document.addEventListener('DOMContentLoaded', init);

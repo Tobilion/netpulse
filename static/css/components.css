@@ -357,3 +357,170 @@
   font-weight: 600;
   color: var(--text);
 }
+
+/* ── 14. LIVE SPEED TEST GAUGE ───────────────────────── */
+.live-test-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 36px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 0.25s var(--ease),
+    box-shadow 0.25s var(--ease);
+}
+.live-test-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow);
+}
+
+.gauge {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  flex-shrink: 0;
+}
+.gauge-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  transition: filter 0.4s;
+}
+.gauge-track {
+  fill: none;
+  stroke: var(--surface-2);
+  stroke-width: 10;
+}
+.gauge-fill {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1.1s var(--ease);
+}
+.gauge-fill.gauge-pulsing {
+  animation: gaugePulse 2.2s ease-in-out infinite;
+}
+@keyframes gaugePulse {
+  0%, 100% { stroke-dashoffset: 560; }
+  50%      { stroke-dashoffset: 300; }
+}
+.gauge-done .gauge-svg {
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.4));
+}
+
+.gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+  padding: 0 16px;
+}
+.gauge-value {
+  font-size: clamp(3rem, 8vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s;
+}
+.gauge-done .gauge-value { color: var(--accent); }
+.gauge-unit {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.gauge-status {
+  min-height: 1.5em;
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.gauge-done .gauge-status {
+  color: var(--text);
+  font-weight: 700;
+}
+.gauge-action {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-hover);
+  color: var(--text);
+  border-radius: 100px;
+  padding: 10px 22px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.25s var(--spring),
+    box-shadow 0.2s;
+}
+.gauge-action:hover {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.35);
+}
+.gauge-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gauge-done .gauge-action {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: var(--accent);
+}
+
+/* Results grid — hidden while testing, revealed on complete */
+.results-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.results-grid[hidden] { display: none; }
+.result-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  min-width: 0;
+}
+.result-item-full { grid-column: 1 / -1; }
+.result-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.result-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.results-reveal {
+  animation: resultsIn 0.55s var(--spring) both;
+}
+@keyframes resultsIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 560px) {
+  .gauge { width: 220px; height: 220px; }
+  .results-grid { grid-template-columns: 1fr 1fr; }
+  .result-item-full { grid-column: 1 / -1; }
+}

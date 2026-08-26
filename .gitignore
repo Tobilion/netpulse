@@ -10,3 +10,6 @@ CLAUDE.md
 
 # Local Project Console chat memory (not for git)
 .console/
+
+# Local Project Console workspace mode (console-managed, not for git)
+console.config.json

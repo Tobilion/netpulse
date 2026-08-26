@@ -7,6 +7,7 @@ If everything fails, records an outage instead of crashing.
 import platform
 import re
 import subprocess
+import threading
 from datetime import datetime
 
 import db
@@ -100,3 +101,111 @@ def run_cycle(db_path=db.DEFAULT_DB_PATH):
     }
     db.insert_measurement(data, db_path=db_path)
     return {"status": "ok", **data}
+
+
+def run_live_cycle(on_phase=None, should_cancel=None, db_path=db.DEFAULT_DB_PATH):
+    """Run one on-demand speed test for the dashboard widget.
+
+    Mirrors run_cycle() but reports progress through on_phase() and checks
+    should_cancel() between phases. Returns a dict with the measurement plus
+    client/server details for the UI, or None if cancelled. Failures are
+    recorded as outages, matching run_cycle().
+    """
+    timestamp = datetime.now()
+    client_label = server_label = None
+
+    def report(name):
+        if on_phase:
+            on_phase(name)
+
+    def cancelled():
+        return bool(should_cancel and should_cancel())
+
+    try:
+        # speedtest-cli is slow to import and owns client/server discovery.
+        import speedtest
+
+        st = speedtest.Speedtest()
+        report("latency")
+        config = st.get_config()
+        server = st.get_best_server()
+        client = config.get("client", {})
+        client_label = f"{client.get('isp') or 'Unknown ISP'} · {client.get('ip') or '?'}"
+        server_label = (
+            f"{server.get('sponsor') or 'Unknown host'} "
+            f"({server.get('name') or '?'}, {server.get('country') or '?'})"
+        )
+
+        # Unloaded latency before any transfer saturates the link.
+        pings = {}
+        for name, host in PING_TARGETS.items():
+            avg, loss = run_ping(host, count=5)
+            pings[name] = {"avg": avg, "loss": loss}
+        if cancelled():
+            return None
+
+        network_down = all(p["avg"] is None or p["loss"] >= 100 for p in pings.values())
+        if network_down:
+            db.insert_outage(
+                timestamp, "Network unreachable (all pings failed)", db_path=db_path
+            )
+            return {
+                "status": "outage",
+                "reason": "network down",
+                "timestamp": timestamp,
+                "client": client_label,
+                "server": server_label,
+            }
+
+        # Loaded latency: ping the primary target while the download saturates
+        # the link, so the value reflects latency under transfer load.
+        loaded = {"avg": None}
+
+        def measure_loaded_latency():
+            loaded["avg"], _ = run_ping(PING_TARGETS["cloudflare"], count=10)
+
+        ping_thread = threading.Thread(target=measure_loaded_latency, daemon=True)
+
+        report("download")
+        ping_thread.start()
+        try:
+            download = st.download() / 1_000_000
+        finally:
+            ping_thread.join(timeout=60)
+        if cancelled():
+            return None
+
+        report("upload")
+        upload = st.upload() / 1_000_000
+        if cancelled():
+            return None
+
+    except Exception as exc:  # speedtest-cli raises various exception types
+        reason = f"Speed test failed: {type(exc).__name__}: {exc}"
+        db.insert_outage(timestamp, reason, db_path=db_path)
+        return {
+            "status": "outage",
+            "reason": reason,
+            "timestamp": timestamp,
+            "client": client_label,
+            "server": server_label,
+        }
+
+    data = {
+        "timestamp": timestamp,
+        "download_mbps": round(download, 2),
+        "upload_mbps": round(upload, 2),
+        "ping_cloudflare_ms": pings["cloudflare"]["avg"],
+        "loss_cloudflare_pct": pings["cloudflare"]["loss"],
+        "ping_google_ms": pings["google"]["avg"],
+        "loss_google_pct": pings["google"]["loss"],
+    }
+    db.insert_measurement(data, db_path=db_path)
+    return {
+        "status": "ok",
+        "unloaded_ms": pings["cloudflare"]["avg"],
+        "loaded_ms": loaded["avg"],
+        "client": client_label,
+        "server": server_label,
+        **data,
+    }
