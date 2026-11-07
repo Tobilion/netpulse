@@ -5,68 +5,90 @@
    ══════════════════════════════════════════════════════ */
 
 /* Chart.js is loaded as a global from CDN — no import needed */
+import { formatLatency, formatSpeedText } from './format.js';
 
-const C_ACCENT  = '#38bdf8';
-const C_ACCENT2 = '#818cf8';
+/* Theme-aware palette (built fresh per chart so light mode re-themes). */
+function palette() {
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  return light
+    ? { accent: '#075985', accent2: '#5B21B6', warn: '#B91C1C',
+        yellow: '#B45309', muted: '#5E574D', grid: 'rgba(43,38,32,0.07)',
+        bg: '#FBF8F1', title: '#2B2620', border: 'rgba(43,38,32,0.2)' }
+    : { accent: '#38bdf8', accent2: '#818cf8', warn: '#f87171',
+        yellow: '#fbbf24', muted: '#8b93a3', grid: 'rgba(255,255,255,0.04)',
+        bg: '#12151c', title: '#f2f4f8', border: 'rgba(255,255,255,0.12)' };
+}
+
+// const C_ACCENT  = '#38bdf8';
+// const C_ACCENT2 = '#818cf8';
 const C_WARN    = '#f87171';
-const C_YELLOW  = '#fbbf24';
-const C_MUTED   = '#8b93a3';
+// const C_YELLOW  = '#fbbf24';
+// const C_MUTED   = '#8b93a3';
 
-/* ── GLOBAL CHART.JS DEFAULTS ───────────────────────── */
-Chart.defaults.color      = C_MUTED;
-Chart.defaults.borderColor = 'rgba(255,255,255,0.04)';
-Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
-Chart.defaults.font.size   = 12;
+function applyDefaults() {
+  const c = palette();
+  Chart.defaults.color = c.muted;
+  Chart.defaults.borderColor = c.grid;
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+  Chart.defaults.font.size = 12;
+  return c;
+}
 
-/* ── SHARED TOOLTIP STYLE ───────────────────────────── */
-const TOOLTIP_DEFAULTS = {
-  backgroundColor:  '#12151c',
-  titleColor:       '#f2f4f8',
-  bodyColor:        '#8b93a3',
-  borderColor:      'rgba(255,255,255,0.12)',
-  borderWidth:      1,
-  padding:          14,
-  cornerRadius:     12,
-  displayColors:    true,
-  boxWidth:         8,
-  boxHeight:        8,
-  usePointStyle:    true,
-  caretSize:        6,
-};
+function tooltipDefaults() {
+  const c = palette();
+  return {
+    backgroundColor: c.bg,
+    titleColor: c.title,
+    bodyColor: c.muted,
+    borderColor: c.border,
+    borderWidth: 1,
+    padding: 14,
+    cornerRadius: 12,
+    displayColors: true,
+    boxWidth: 8,
+    boxHeight: 8,
+    usePointStyle: true,
+    caretSize: 6,
+  };
+}
 
-/* ── SHARED SCALE OPTIONS ───────────────────────────── */
-const BASE_SCALES = {
-  x: {
-    grid:   { display: false },
-    border: { display: false },
-    ticks:  { maxTicksLimit: 10, maxRotation: 0, color: C_MUTED, padding: 6 },
-  },
-  y: {
-    beginAtZero: true,
-    grid: {
-      color:      'rgba(255,255,255,0.04)',
-      drawTicks:  false,
+/* ── SHARED SCALE OPTIONS (built fresh per chart) ───── */
+function baseScales() {
+  const c = applyDefaults();
+  return {
+    x: {
+      grid: { display: false },
+      border: { display: false },
+      ticks: { maxTicksLimit: 10, maxRotation: 0, color: c.muted, padding: 6 },
     },
-    border: { display: false },
-    ticks:  { color: C_MUTED, padding: 10 },
-  },
-};
+    y: {
+      beginAtZero: true,
+      grid: { color: c.grid, drawTicks: false },
+      border: { display: false },
+      ticks: { color: c.muted, padding: 10 },
+    },
+  };
+}
 
-/* ── BASE LINE OPTIONS ──────────────────────────────── */
-const BASE_LINE_OPTIONS = {
-  responsive:         true,
-  maintainAspectRatio: false,
-  interaction:        { mode: 'index', intersect: false },
-  plugins: {
-    legend:  { labels: { usePointStyle: true, color: C_MUTED, padding: 20 } },
-    tooltip: TOOLTIP_DEFAULTS,
-  },
-  scales: BASE_SCALES,
-  elements: {
-    point: { radius: 0, hitRadius: 12, hoverRadius: 4 },
-    line:  { tension: 0.35, borderWidth: 2 },
-  },
-};
+/* ── BASE LINE OPTIONS (built fresh per chart) ──────── */
+function baseLineOptions() {
+  const c = applyDefaults();
+  const scales = baseScales();
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { usePointStyle: true, color: c.muted, padding: 20 } },
+      tooltip: tooltipDefaults(),
+    },
+    scales,
+    elements: {
+      point: { radius: 0, hitRadius: 12, hoverRadius: 4 },
+      line: { tension: 0.35, borderWidth: 2 },
+    },
+  };
+}
 
 /* ── GRADIENT HELPER ────────────────────────────────── */
 function makeGradient(ctx, colorTop, colorBottom, height = 290) {
@@ -88,6 +110,35 @@ export function destroyCharts() {
   _speedChart = _latencyChart = _hourlyChart = null;
 }
 
+/* Marks where the measurement engine changed (e.g. Python -> Ookla). */
+const engineChangePlugin = {
+  id: 'engineChange',
+  afterDatasetsDraw(chart) {
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    const rows = chart.data._measurements || [];
+    ctx.save();
+    ctx.strokeStyle = 'rgba(248,113,113,0.5)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i].engine || null) !== (rows[i - 1].engine || null)) {
+        const x = chart.scales.x.getPixelForValue(i);
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        if (rows[i].engine) {
+          ctx.fillStyle = 'rgba(248,113,113,0.8)';
+          ctx.font = '600 10px Inter, sans-serif';
+          ctx.fillText(`engine: ${rows[i].engine}`, x + 4, chartArea.top + 10);
+        }
+      }
+    }
+    ctx.restore();
+  },
+};
+
 /* ── SPEED CHART (signature: draws left → right) ────── */
 export function buildSpeedChart(measurements) {
   const canvas = document.getElementById('speedChart');
@@ -103,25 +154,46 @@ export function buildSpeedChart(measurements) {
     type: 'line',
     data: {
       labels,
+      _measurements: measurements,
       datasets: [
         {
-          label:           'Download (Mbps)',
+          label:           'Download',
           data:            measurements.map(m => m.download_mbps),
-          borderColor:     C_ACCENT,
+          borderColor:     palette().accent,
           backgroundColor: dlGrad,
           fill:            true,
         },
         {
-          label:           'Upload (Mbps)',
+          label:           'Upload',
           data:            measurements.map(m => m.upload_mbps),
-          borderColor:     C_ACCENT2,
+          borderColor:     palette().accent2,
           backgroundColor: ulGrad,
           fill:            true,
         },
       ],
     },
     options: {
-      ...BASE_LINE_OPTIONS,
+      ...baseLineOptions(),
+      plugins: {
+        ...baseLineOptions().plugins,
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            label: (item) =>
+              ` ${item.dataset.label}: ${formatSpeedText(item.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        ...baseScales(),
+        y: {
+          ...baseScales().y,
+          ticks: {
+            ...baseScales().y.ticks,
+            callback: (v) => formatSpeedText(v),
+          },
+        },
+      },
       /* ✦ SIGNATURE MOMENT — chart draws left → right on load */
       animation: {
         duration: 1200,
@@ -143,6 +215,7 @@ export function buildSpeedChart(measurements) {
         },
       },
     },
+    plugins: [engineChangePlugin],
   });
 }
 
@@ -161,27 +234,49 @@ export function buildLatencyChart(measurements) {
     type: 'line',
     data: {
       labels,
+      _measurements: measurements,
       datasets: [
         {
           label:           'Cloudflare (1.1.1.1)',
           data:            measurements.map(m => m.ping_cloudflare_ms),
-          borderColor:     C_YELLOW,
+          borderColor:     palette().yellow,
           backgroundColor: cfGrad,
           fill:            true,
         },
         {
           label:           'Google (8.8.8.8)',
           data:            measurements.map(m => m.ping_google_ms),
-          borderColor:     C_ACCENT2,
+          borderColor:     palette().accent2,
           backgroundColor: goGrad,
           fill:            true,
         },
       ],
     },
     options: {
-      ...BASE_LINE_OPTIONS,
+      ...baseLineOptions(),
+      plugins: {
+        ...baseLineOptions().plugins,
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            label: (item) =>
+              ` ${item.dataset.label}: ${formatLatency(item.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        ...baseScales(),
+        y: {
+          ...baseScales().y,
+          ticks: {
+            ...baseScales().y.ticks,
+            callback: (v) => formatLatency(v),
+          },
+        },
+      },
       animation: { duration: 800, easing: 'easeOutQuart' },
     },
+    plugins: [engineChangePlugin],
   });
 }
 
@@ -199,20 +294,36 @@ export function buildHourlyChart(hourlyData) {
     data: {
       labels: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`),
       datasets: [{
-        label:           'Avg Download (Mbps)',
+        label:           'Avg Download',
         data:            hourlyData,
         backgroundColor: barGrad,
-        borderColor:     C_ACCENT,
+        borderColor:     palette().accent,
         borderWidth:     1,
         borderRadius:    5,
         borderSkipped:   false,
       }],
     },
     options: {
-      ...BASE_LINE_OPTIONS,
+      ...baseLineOptions(),
       plugins: {
-        ...BASE_LINE_OPTIONS.plugins,
+        ...baseLineOptions().plugins,
         legend: { display: false },
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            label: (item) => ` ${formatSpeedText(item.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        ...baseScales(),
+        y: {
+          ...baseScales().y,
+          ticks: {
+            ...baseScales().y.ticks,
+            callback: (v) => formatSpeedText(v),
+          },
+        },
       },
       animation: { duration: 700, easing: 'easeOutQuart' },
     },

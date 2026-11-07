@@ -1,0 +1,12 @@
+{
+  "name": "netpulse",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test:gauge": "node tests/test_gauge_puppeteer.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.16.0"
+  }
+}

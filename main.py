@@ -12,11 +12,19 @@ import argparse
 import csv
 import math
 import random
+import re
 import sys
 import time
 from datetime import datetime, timedelta
 
 import db
+
+
+def _mask_ip(text):
+    """Mask external IPs in exported text (e.g. 203.0.113.45 -> 203.0.113.•••)."""
+    if not text:
+        return text
+    return re.sub(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\b", r"\1•••", str(text))
 
 
 def ensure_speedtest_importable():
@@ -77,13 +85,20 @@ def cmd_export(_args):
         writer.writerow(
             ["id", "timestamp", "download_mbps", "upload_mbps",
              "ping_cloudflare_ms", "loss_cloudflare_pct",
-             "ping_google_ms", "loss_google_pct"]
+             "ping_google_ms", "loss_google_pct",
+             "engine", "server", "client"]
         )
         for m in measurements:
-            writer.writerow([m[k] for k in
-                             ("id", "timestamp", "download_mbps", "upload_mbps",
-                              "ping_cloudflare_ms", "loss_cloudflare_pct",
-                              "ping_google_ms", "loss_google_pct")])
+            writer.writerow(
+                [m[k] for k in
+                 ("id", "timestamp", "download_mbps", "upload_mbps",
+                  "ping_cloudflare_ms", "loss_cloudflare_pct",
+                  "ping_google_ms", "loss_google_pct")] + [
+                    m.get("engine"),
+                    m.get("server"),
+                    _mask_ip(m.get("client")),
+                ]
+            )
 
     with open("netpulse_outages.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -147,7 +162,8 @@ def cmd_serve(_args):
     from dashboard import app
 
     print("NetPulse dashboard: http://localhost:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # Threaded so SSE streams don't block /status, /data, or /cancel.
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
 
 
 def main():

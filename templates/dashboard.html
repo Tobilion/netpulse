@@ -6,30 +6,33 @@
   <title>NetPulse — ISP Performance Tracker</title>
   <meta name="description" content="Real-time ISP performance dashboard. Track download speed, upload speed, ping, and uptime trends over time with NetPulse.">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0c10'/%3E%3Cpath d='M8 32h12l6-16 12 32 6-16h12' fill='none' stroke='%2338bdf8' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 
-  <!-- Styles -->
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/themes.css">
+  <link rel="stylesheet" href="/static/css/tabs.css">
 
-  <!-- Chart.js (global, loaded before modules) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    // Set theme before first paint from storage (avoid flash).
+    try {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('netpulse-theme') === 'light' ? 'light' : 'dark'
+      );
+    } catch { document.documentElement.setAttribute('data-theme', 'dark'); }
+  </script>
 </head>
 <body>
 
-  <!-- A7: Scroll Progress Bar -->
   <div id="scrollProgress" class="scroll-progress-bar" aria-hidden="true"></div>
 
-  <!-- A4: Ambient GlowOrbs (positioned behind everything via CSS) -->
   <div class="glow-orb orb-1" aria-hidden="true"></div>
   <div class="glow-orb orb-2" aria-hidden="true"></div>
   <div class="glow-orb orb-3" aria-hidden="true"></div>
 
-  <!-- ───────── HEADER ───────── -->
   <header class="site-header">
     <div class="logo">
-      <!-- Logo mark SVG -->
       <svg width="28" height="28" viewBox="0 0 64 64" fill="none"
         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <rect width="64" height="64" rx="14" fill="#0a0c10"/>
@@ -40,34 +43,28 @@
       <span class="logo-wordmark">Net<span class="grad-text">Pulse</span></span>
     </div>
 
-    <!-- A5: TubelightNav — range picker -->
-    <nav class="tubelight-nav" id="rangePicker" aria-label="Time range selector">
-      <div class="nav-pill" aria-hidden="true"></div>
-      <button data-range="24h" id="range-24h">24h</button>
-      <button data-range="7d"  id="range-7d" class="active">7d</button>
-      <button data-range="30d" id="range-30d">30d</button>
-      <button data-range="all" id="range-all">All</button>
-    </nav>
+    <div class="header-controls">
+      <nav class="tubelight-nav" id="rangePicker" aria-label="Time range selector">
+        <div class="nav-pill" aria-hidden="true"></div>
+        <button data-range="24h" id="range-24h">24h</button>
+        <button data-range="7d"  id="range-7d" class="active">7d</button>
+        <button data-range="30d" id="range-30d">30d</button>
+        <button data-range="all" id="range-all">All</button>
+      </nav>
+      <button type="button" class="theme-toggle" data-theme-btn aria-label="Switch to light mode">☀ Light</button>
+    </div>
   </header>
 
-  <!-- ───────── HERO ───────── -->
   <section class="hero" aria-labelledby="heroHeadline">
     <p class="section-label">LIVE PERFORMANCE</p>
-
-    <!-- A6: TextScramble target — height reserved by min-height in CSS -->
     <h1 id="heroHeadline" class="hero-headline">Loading your network data…</h1>
-
     <div class="hero-meta">
-      <!-- A9: ProgressRing (uptime) — filled by createProgressRing() in JS -->
       <div class="progress-ring-container" id="uptimeRingContainer"
         aria-label="Uptime progress ring"></div>
-
       <div class="uptime-meta">
         <div class="uptime-value"  id="uptimeValue">–</div>
         <div class="uptime-subtitle" id="uptimeSubtitle">Uptime</div>
       </div>
-
-      <!-- Last measured pill -->
       <div class="last-measured-pill" id="lastMeasuredPill" aria-live="polite">
         <span class="pulse-dot" aria-hidden="true"></span>
         last measured —
@@ -75,69 +72,98 @@
     </div>
   </section>
 
-  <!-- ───────── MAIN CONTENT ───────── -->
+  <nav class="tabs-nav" id="mainTabs" aria-label="Dashboard sections" role="tablist">
+    <button type="button" data-tab-btn="measure" role="tab" aria-selected="true">Measure</button>
+    <button type="button" data-tab-btn="trends" role="tab" aria-selected="false">Trends</button>
+    <button type="button" data-tab-btn="outages" role="tab" aria-selected="false">Outages</button>
+    <button type="button" data-tab-btn="log" role="tab" aria-selected="false">Log</button>
+    <button type="button" data-tab-btn="settings" role="tab" aria-selected="false">Settings</button>
+  </nav>
+
   <main class="main-content">
 
-    <!-- Live on-demand speed test (gauge markup rendered by speedtest.js) -->
-    <section class="live-test-section" aria-label="On-demand speed test">
-      <p class="section-label">LIVE SPEED TEST</p>
-      <div id="liveTestMount"></div>
+    <section id="tab-measure">
+      <section class="live-test-section" aria-label="On-demand speed test">
+        <p class="section-label">LIVE SPEED TEST</p>
+        <div id="liveTestMount"></div>
+      </section>
+
+      <section aria-label="Network statistics">
+        <p class="section-label">NETWORK STATS</p>
+        <label class="engine-row">
+          Engine
+          <select id="engineFilter" aria-label="Engine filter">
+            <option value="all">All</option>
+            <option value="ookla">Ookla</option>
+            <option value="python">speedtest-cli</option>
+          </select>
+          <span id="engineMeta" style="font-size:0.78rem"></span>
+        </label>
+        <div class="stats-grid" id="statsGrid" aria-live="polite"></div>
+      </section>
     </section>
 
-    <!-- A8: AnimatedCounter stat cards (A1: SpotlightCard + TiltCard) -->
-    <section aria-label="Network statistics">
-      <p class="section-label">NETWORK STATS</p>
-      <!-- A10: SkeletonLoader shown here while data loads; replaced by stat cards -->
-      <div class="stats-grid" id="statsGrid" aria-live="polite"></div>
+    <section id="tab-trends" hidden>
+      <section id="chartsSection" aria-label="Performance charts">
+        <div class="chart-card spotlight-card" id="speedChartCard">
+          <div class="chart-header">
+            <p class="section-label">THROUGHPUT</p>
+            <h2>Download &amp; Upload Speed</h2>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="speedChart" aria-label="Download and upload speed over time"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card spotlight-card" id="latencyChartCard">
+          <div class="chart-header">
+            <p class="section-label">LATENCY</p>
+            <h2>Ping &amp; Response Times</h2>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="latencyChart" aria-label="Ping latency over time"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card spotlight-card" id="hourlyChartCard">
+          <div class="chart-header">
+            <p class="section-label">DAILY PATTERNS</p>
+            <h2>Average Download Speed by Hour</h2>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="hourlyChart" aria-label="Average download speed per hour of day"></canvas>
+          </div>
+        </div>
+      </section>
     </section>
 
-    <!-- Charts section — hidden when DB is empty -->
-    <section id="chartsSection" aria-label="Performance charts">
-
-      <!-- A1: SpotlightCard wrapping each chart -->
-      <div class="chart-card spotlight-card" id="speedChartCard">
-        <div class="chart-header">
-          <p class="section-label">THROUGHPUT</p>
-          <h2>Download &amp; Upload Speed</h2>
-        </div>
-        <div class="chart-wrap">
-          <canvas id="speedChart" aria-label="Download and upload speed over time"></canvas>
-        </div>
-      </div>
-
-      <div class="chart-card spotlight-card" id="latencyChartCard">
-        <div class="chart-header">
-          <p class="section-label">LATENCY</p>
-          <h2>Ping &amp; Response Times</h2>
-        </div>
-        <div class="chart-wrap">
-          <canvas id="latencyChart" aria-label="Ping latency over time"></canvas>
-        </div>
-      </div>
-
-      <div class="chart-card spotlight-card" id="hourlyChartCard">
-        <div class="chart-header">
-          <p class="section-label">DAILY PATTERNS</p>
-          <h2>Average Download Speed by Hour</h2>
-        </div>
-        <div class="chart-wrap">
-          <canvas id="hourlyChart" aria-label="Average download speed per hour of day"></canvas>
-        </div>
-      </div>
-
+    <section id="tab-outages" hidden>
+      <section class="outages-section" id="outagesSection" aria-label="Outage log">
+        <p class="section-label">INCIDENTS</p>
+        <h2 class="section-title">Outage Log</h2>
+        <p class="outages-note">Note: transfer failures where ping worked are listed as <strong>Failed tests</strong> below — they are not counted as outages or in uptime. Legacy “Speed test failed” outages are classified the same way at read time.</p>
+        <div id="outagesList" aria-live="polite"></div>
+      </section>
     </section>
 
-    <!-- A12: EmptyState shown above if no data; outage log shown otherwise -->
-    <section class="outages-section" id="outagesSection" aria-label="Outage log">
-      <p class="section-label">INCIDENTS</p>
-      <h2 class="section-title">Outage Log</h2>
-      <!-- A13: Outage cards — clicking opens Modal -->
-      <div id="outagesList" aria-live="polite"></div>
+    <section id="tab-log" hidden>
+      <section class="chart-card" aria-label="Log">
+        <p class="section-label">LOG</p>
+        <h2>Measurement Log</h2>
+        <p class="placeholder-note">Stage 3: unified measurements + failed tests with filters and CSV export will live here.</p>
+      </section>
+    </section>
+
+    <section id="tab-settings" hidden>
+      <section class="chart-card" aria-label="Settings">
+        <p class="section-label">SETTINGS</p>
+        <h2>Settings</h2>
+        <p class="placeholder-note">Stage 3: plan speed, theme and engine defaults will live here.</p>
+      </section>
     </section>
 
   </main>
 
-  <!-- ───────── FOOTER ───────── -->
   <footer class="site-footer">
     <p>
       NetPulse — ISP performance tracker by
@@ -146,7 +172,6 @@
     </p>
   </footer>
 
-  <!-- A13: Modal — outage detail -->
   <div id="outageModal" class="modal-backdrop" hidden
     role="dialog" aria-modal="true" aria-labelledby="modalHeading">
     <div class="modal-panel">
@@ -161,11 +186,9 @@
     </div>
   </div>
 
-  <!-- A11: Toast container -->
   <div id="toastContainer" class="toast-container"
     aria-live="polite" aria-atomic="false"></div>
 
-  <!-- ES module entry point (imports components.js + charts.js) -->
   <script type="module" src="/static/js/app.js"></script>
 
 </body>

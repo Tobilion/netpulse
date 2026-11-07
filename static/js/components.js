@@ -151,7 +151,7 @@ export function initScrollProgress(barEl) {
 }
 
 /* ── 8. ANIMATED COUNTER ────────────────────────────── */
-export function animatedCounter(el, target, suffix = '', duration = 1000) {
+export function animatedCounter(el, target, suffix = '', duration = 1000, formatter = null) {
   if (target === null || target === undefined || isNaN(parseFloat(target))) {
     el.textContent = '–';
     return;
@@ -160,23 +160,27 @@ export function animatedCounter(el, target, suffix = '', duration = 1000) {
   const isInt     = Number.isInteger(numTarget);
   const start     = performance.now();
 
+  const renderValue = (value) => {
+    if (formatter) return formatter(value);
+    return (isInt ? Math.round(value) : value.toFixed(1)) + suffix;
+  };
+
   const tick = (now) => {
     const elapsed  = now - start;
     const progress = Math.min(elapsed / duration, 1);
     const eased    = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-    const current  = numTarget * eased;
-    el.textContent = (isInt ? Math.round(current) : current.toFixed(1)) + suffix;
+    el.textContent = renderValue(numTarget * eased);
     if (progress < 1) requestAnimationFrame(tick);
-    else el.textContent = (isInt ? numTarget : numTarget.toFixed(1)) + suffix;
+    else el.textContent = renderValue(numTarget);
   };
   requestAnimationFrame(tick);
 }
 
-export function observeAndCount(el, target, suffix, duration = 1000) {
+export function observeAndCount(el, target, suffix, duration = 1000, formatter = null) {
   const io = new IntersectionObserver(entries => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
-        animatedCounter(el, target, suffix, duration);
+        animatedCounter(el, target, suffix, duration, formatter);
         io.disconnect();
       }
     });

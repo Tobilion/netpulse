@@ -1,0 +1,89 @@
+/* Light mode — warm cream (WCAG AA). Dark tokens live in main.css and are
+   untouched. Text #2B2620 on #FBF8F1 passes AA; muted #5E574D passes AA. */
+
+/* Paper texture (very subtle) shared by both themes' surfaces in light mode. */
+[data-theme="light"] {
+  --bg: #F6F1E7;
+  --surface: #FBF8F1;
+  --surface-2: #F1EADC;
+  --border: rgba(43, 38, 32, 0.14);
+  --border-hover: rgba(43, 38, 32, 0.24);
+  --text: #2B2620;
+  --muted: #5E574D;
+  --accent: #075985;
+  --accent-2: #5B21B6;
+  --warn: #B91C1C;
+  --good: #047857;
+  --grad: linear-gradient(135deg, #075985, #5B21B6);
+  --shadow: 0 4px 18px rgba(43, 38, 32, 0.10);
+  --shadow-lg: 0 14px 36px rgba(43, 38, 32, 0.14);
+}
+
+[data-theme="light"] body {
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(7, 89, 133, 0.05), transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(91, 33, 182, 0.04), transparent 50%),
+    var(--bg);
+}
+
+[data-theme="light"] .site-header {
+  background: rgba(246, 241, 231, 0.88);
+}
+
+[data-theme="light"] .glow-orb {
+  opacity: 0.05;
+}
+
+[data-theme="light"] .tubelight-nav .nav-pill {
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(43, 38, 32, 0.12);
+}
+
+[data-theme="light"] .spotlight-card.spotlight-active {
+  background-image: radial-gradient(350px circle at var(--mx) var(--my), rgba(7, 89, 133, 0.06), transparent 80%);
+}
+
+[data-theme="light"] .gauge-arc-track {
+  stroke: #E7DEC9;
+}
+
+[data-theme="light"] .gauge-needle {
+  stroke: #2B2620;
+}
+
+[data-theme="light"] .gauge-hub {
+  fill: #fff;
+  stroke: #2B2620;
+}
+
+[data-theme="light"] .modal-backdrop {
+  background: rgba(43, 38, 32, 0.35);
+}
+
+[data-theme="light"] .toast,
+[data-theme="light"] .empty-state,
+[data-theme="light"] .skeleton-card {
+  background: var(--surface);
+}
+
+/* Theme toggle button in the header. */
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.theme-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 100px;
+  padding: 7px 16px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+}

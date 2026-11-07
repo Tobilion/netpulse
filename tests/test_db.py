@@ -97,3 +97,19 @@ def test_stats_empty_db(db_path):
     assert stats["uptime_pct"] is None
     assert stats["avg_download_mbps"] is None
     assert stats["measurement_count"] == 0
+
+
+def test_default_db_path_env_override(tmp_path, monkeypatch):
+    copy_path = str(tmp_path / "copy.db")
+    monkeypatch.setenv("NETPULSE_DB", copy_path)
+    assert db.get_default_db_path() == copy_path
+    round_trip = db.insert_measurement(make_measurement(), db_path=db.get_default_db_path())
+    assert round_trip == 1
+    assert len(db.get_measurements(db_path=copy_path)) == 1
+
+
+def test_default_db_path_unset(monkeypatch):
+    monkeypatch.delenv("NETPULSE_DB", raising=False)
+    default = db.get_default_db_path()
+    assert default.endswith("netpulse.db")
+    assert default == db.DEFAULT_DB_PATH or default.endswith("netpulse.db")

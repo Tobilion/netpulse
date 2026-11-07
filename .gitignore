@@ -13,3 +13,7 @@ CLAUDE.md
 
 # Local Project Console workspace mode (console-managed, not for git)
 console.config.json
+
+# Node (dev-only gauge tests)
+node_modules/
+tests/screenshots/
