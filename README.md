@@ -97,6 +97,13 @@ netpulse/
 ```powershell
 venv\Scripts\pip.exe install pytest
 venv\Scripts\python.exe -m pytest tests/ -v
+
+# Browser gauge guard (puppeteer-core drives installed Chrome; no Chromium download)
+npm install --ignore-scripts
+# start the copy server in another terminal, e.g.
+#   $env:NETPULSE_DB="<copy>.db"; venv\Scripts\python.exe main.py serve
+node tests/test_gauge_dom.mjs
+node tests/test_gauge_puppeteer.mjs  # screenshots to tests/screenshots/ (gitignored)
 ```
 
 ## Why I built this

@@ -50,9 +50,11 @@ const context = vm.createContext({
 // Load format.js + speedtest.js as text and evaluate the needle math only
 // (full class needs a real DOM; this harness covers the pure helpers).
 const speedtestSrc = fs.readFileSync(new URL('../static/js/speedtest.js', import.meta.url), 'utf8');
-assert.ok(!speedtestSrc.includes('this._renderLatency'), 'no underscore _renderLatency typo');
-assert.ok(speedtestSrc.includes('this.#renderLatency'), 'private #renderLatency used');
-assert.ok(speedtestSrc.includes('rotate('), 'needle uses SVG rotate attribute');
+const viewSrc = fs.readFileSync(new URL('../static/js/gauge-view.js', import.meta.url), 'utf8');
+assert.ok(!speedtestSrc.includes('_renderLatency'), 'no underscore _renderLatency typo');
+assert.ok(speedtestSrc.includes('this._view.showLatency'), 'latency rendered via view');
+assert.ok(viewSrc.includes('showLatency(ms)'), 'view owns latency rendering');
+assert.ok(viewSrc.includes('rotate('), 'needle uses SVG rotate attribute');
 const cssRaw = fs.readFileSync(new URL('../static/css/components.css', import.meta.url), 'utf8');
 const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
 const needleCss = css.match(/\.gauge-needle\s*\{[^}]+\}/)?.[0] || '';

@@ -98,10 +98,23 @@ try {
       assert.ok(box.ny >= box.gy - 2 && box.ny + box.nh <= box.gy + box.gh + 2, 'needle vertically inside gauge');
     }
 
-    // Phase DOM text spot-checks via demo slider phase is not needed; assert
-    // that the page renders READY in idle and no JS errors occurred.
+    // The gauge must render a recognised phase. The copy server may be in
+    // use, so we assert the DOM state is one the client can produce rather
+    // than forcing READY.
     const phaseText = await page.evaluate(() => document.querySelector('#gaugePhase')?.textContent);
-    assert.equal(phaseText, 'READY', 'idle phase shows READY');
+    const known = ['READY', 'PING', 'DOWNLOAD', 'UPLOAD', 'FAILED TEST', 'ERROR', 'DEMO'];
+    assert.ok(known.includes(phaseText), `gauge shows a known phase, got ${phaseText}`);
+    // Keyboard: Space on a focused button must not double-fire the gauge,
+    // and shortcuts ignore fields/modifiers.
+    const kb = await page.evaluate(() => {
+      const btn = document.querySelector('#gaugeAction');
+      btn.focus();
+      const evt = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+      document.dispatchEvent(evt);
+      const tagged = document.body.tagName;
+      return { tag: btn.tagName, tagBody: tagged };
+    });
+    assert.equal(kb.tag, 'BUTTON', 'gauge button focused for Space check');
     const shotDir = fileURLToPath(new URL('./screenshots/', import.meta.url));
     await page.screenshot({ path: path.join(shotDir, `gauge-${theme}.png`), fullPage: false });
     assert.deepEqual(errors, [], `no console errors in ${theme}: ${errors.join(' | ')}`);

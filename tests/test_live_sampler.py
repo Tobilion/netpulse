@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import live_sampler  # noqa: E402
+import ookla_source  # noqa: E402
 
 TEST_START = '{"type":"testStart","timestamp":"2026-11-07T13:13:55Z","isp":"Covenant University","interface":{"internalIp":"198.51.100.10","name":"","macAddr":"AA:BB:CC:DD:EE:FF","isVpn":false,"externalIp":"203.0.113.45"},"server":{"id":46960,"host":"speedtest-los.melbicom.net","port":8080,"name":"Melbicom","location":"Lagos","country":"Nigeria","ip":"192.0.2.77"}}'
 PING = '{"type":"ping","timestamp":"2026-11-07T13:13:56Z","ping":{"jitter":25.807,"latency":130.776,"progress":1.0}}'
@@ -81,6 +82,7 @@ def test_fallback_when_ookla_missing(monkeypatch):
 def test_explicit_ookla_requires_binary(monkeypatch):
     monkeypatch.setenv("NETPULSE_LIVE_SOURCE", "ookla")
     monkeypatch.setattr(live_sampler, "find_ookla_binary", lambda: None)
+    monkeypatch.setattr(ookla_source, "find_ookla_binary", lambda: None)
     with pytest.raises(live_sampler.PreStartError):
         live_sampler.get_live_source()
 

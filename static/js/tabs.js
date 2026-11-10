@@ -44,6 +44,8 @@ export function initTabs(onShow) {
     const inField = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
     if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === ' ') {
+      // Let a focused button handle Space itself (native click) — never double-fire.
+      if (tag === 'button') return;
       if (currentTab() === 'measure') {
         e.preventDefault();
         document.getElementById('gaugeAction')?.click();

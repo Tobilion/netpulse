@@ -1,7 +1,4 @@
-"""Live speed-test data sources behind a small swappable interface.
-
-Frontend contract (SSE events + /api/speedtest/status JSON) is identical
-for every source. Engine choice never changes frontend code.
+"""Live speed-test source selection + Python byte-counter source.
 
 Engine selection (auto): Ookla CLI if available, else the Python
 speedtest-cli source. Fallback happens only when Ookla is missing or
@@ -16,111 +13,24 @@ Live samples drive the needle only. The returned final dict holds the
 stored values (averages over the whole phase) plus ``engine``.
 """
 
-import json
 import os
-import queue
-import re
-import shutil
-import subprocess
 import threading
 import time
 
-
-def mask_ip(text):
-    """Mask an IPv4 address in text: 203.0.113.45 -> 203.0.113.•••."""
-    if not text:
-        return text
-    return re.sub(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\b", r"\1•••", str(text))
-
-WINGET_OOKLA_PATH = (
-    r"C:\Users\tobil\AppData\Local\Microsoft\WinGet\Packages"
-    r"\Ookla.Speedtest.CLI_Microsoft.Winget.Source_8wekyb3d8bbwe\speedtest.exe"
+from ookla_parse import (
+    bandwidth_to_mbps,
+    labels_from_test_start,
+    ookla_progress_event,
+    parse_ookla_line,
+    result_to_final,
 )
-
-
-class PreStartError(RuntimeError):
-    """Source failed before any test progress was emitted."""
-
-
-class PartialTestError(RuntimeError):
-    """Test failed after some progress; carries partial results."""
-
-    def __init__(self, message, partial):
-        super().__init__(message)
-        self.partial = partial  # {download_mbps, upload_mbps, client, server, engine, detail}
-
-
-def _watchdog_seconds(name, default):
-    try:
-        return int(os.environ.get(name, str(default)))
-    except ValueError:
-        return default
-
-
-class LiveDataSource:
-    """Interface for a live speed-test source.
-
-    run() blocks until the test finishes and returns:
-        {"download_mbps": float, "upload_mbps": float,
-         "client": str|None, "server": str|None, "engine": str}
-    It calls on_progress(dict) as real samples become available and
-    returns None when should_cancel() becomes true.
-    """
-
-    name = "unknown"
-
-    def run(self, on_progress=None, should_cancel=None):
-        raise NotImplementedError
-
-
-def find_ookla_binary():
-    """Locate the Ookla CLI binary.
-
-    Order: NETPULSE_OOKLA_PATH, shutil.which("speedtest"), then the
-    known winget path. The Python speedtest-cli shim (venv speedtest.exe)
-    and any non-Ookla "speedtest" are rejected via --version output.
-    Returns the path or None.
-    """
-    candidates = []
-    env_path = os.environ.get("NETPULSE_OOKLA_PATH")
-    if env_path:
-        candidates.append(env_path)
-    found = shutil.which("speedtest")
-    if found:
-        candidates.append(found)
-    if os.path.exists(WINGET_OOKLA_PATH):
-        candidates.append(WINGET_OOKLA_PATH)
-    for cand in candidates:
-        if cand and os.path.exists(cand) and _is_ookla_binary(cand):
-            return cand
-    return None
-
-
-def _is_ookla_binary(path):
-    """True when ``path --version`` identifies itself as Ookla."""
-    try:
-        proc = subprocess.run(
-            [path, "--version"], capture_output=True, text=True, timeout=10
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    out = (proc.stdout or "") + (proc.stderr or "")
-    return "ookla" in out.lower()
-
-
-def ookla_version(path):
-    """Short version string like 'ookla-cli 1.2.0.84', or None."""
-    try:
-        proc = subprocess.run(
-            [path, "--version"], capture_output=True, text=True, timeout=10
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    import re
-
-    out = (proc.stdout or "") + (proc.stderr or "")
-    match = re.search(r"(\d+\.\d+\.\d+(?:\.\d+)?)", out)
-    return f"ookla-cli {match.group(1)}" if match else "ookla-cli"
+from ookla_source import OoklaLiveSource, find_ookla_binary, kill_process_tree, mask_ip
+from sources_base import (
+    LiveDataSource,
+    PartialTestError,
+    PreStartError,
+    watchdog_seconds,
+)
 
 
 class SpeedtestCLILiveSource(LiveDataSource):
@@ -231,299 +141,6 @@ class SpeedtestCLILiveSource(LiveDataSource):
         }
 
 
-class OoklaLiveSource(LiveDataSource):
-    """Ookla CLI source: `speedtest --format=jsonl --progress=yes`.
-
-    --accept-license is passed so a fresh machine accepts on first run;
-    acceptance persists after that. --accept-gdpr is deliberately not
-    passed (no GDPR prompt was observed for this connection).
-
-    Real shapes seen on 2026-11-07 (speedtest 1.2.0.84, Lagos):
-      testStart: {"type","timestamp","isp","interface":{...,"externalIp"},
-                  "server":{"id","host","name","location","country","ip"}}
-      ping:      {"type","timestamp","ping":{"latency","jitter","progress"}}
-      download:  {"type","timestamp","download":{"bandwidth","bytes",
-                  "elapsed","progress"[, "latency":{"iqm"}]}}
-      upload:    same keys under "upload"
-      result:    {...,"ping":{"latency","jitter","low","high"},
-                  "download":{"bandwidth",...},"upload":{...},"result":{...}}
-    ``bandwidth`` is bytes/sec; Mbps = bandwidth * 8 / 1e6.
-    """
-
-    def __init__(self, binary=None):
-        self._binary = binary or find_ookla_binary()
-        self.name = "ookla-cli (version unknown)"
-        if self._binary:
-            ver = ookla_version(self._binary)
-            if ver:
-                self.name = ver
-
-    # Watchdog limits for slow links: stall if no JSONL for this long,
-    # fail if the whole run exceeds the maximum. Hitting either kills
-    # the child tree so no orphan speedtest.exe survives.
-    @property
-    def STALL_SECONDS(self):
-        return _watchdog_seconds("NETPULSE_STALL_SECONDS", 30)
-
-    @property
-    def MAX_RUNTIME_SECONDS(self):
-        return _watchdog_seconds("NETPULSE_MAX_JOB_SECONDS", 150)
-
-    def run(self, on_progress=None, should_cancel=None):
-        binary = self._binary or find_ookla_binary()
-        if not binary:
-            raise PreStartError("Ookla CLI binary not found")
-
-        def emit(event):
-            if on_progress:
-                on_progress(event)
-
-        def cancelled():
-            return bool(should_cancel and should_cancel())
-
-        cmd = [binary, "--format=jsonl", "--progress=yes", "--accept-license"]
-        try:
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, bufsize=1,
-            )
-        except OSError as exc:
-            raise PreStartError(f"Cannot start Ookla CLI: {exc}") from exc
-
-        lines = queue.Queue()
-        stderr_lines = []
-
-        def reader():
-            assert proc.stdout is not None
-            try:
-                for line in proc.stdout:
-                    lines.put(line)
-            except Exception:
-                pass
-            lines.put(None)
-
-        def err_reader():
-            assert proc.stderr is not None
-            try:
-                for line in proc.stderr:
-                    stderr_lines.append(line)
-            except Exception:
-                pass
-
-        threading.Thread(target=reader, daemon=True).start()
-        threading.Thread(target=err_reader, daemon=True).start()
-
-        client_label = server_label = None
-        final = None
-        seen_progress = False
-        last_download_mbps = None
-        last_upload_mbps = None
-        log_events = []
-        started = time.monotonic()
-        last_line_at = started
-        cancelled_result = False
-        stall_reason = None
-        try:
-            while True:
-                if cancelled():
-                    _kill_process_tree(proc)
-                    cancelled_result = True
-                    break
-                now = time.monotonic()
-                if now - started > self.MAX_RUNTIME_SECONDS:
-                    _kill_process_tree(proc)
-                    stall_reason = (
-                        f"Watchdog: test exceeded {self.MAX_RUNTIME_SECONDS}s max runtime"
-                    )
-                    break
-                if now - last_line_at > self.STALL_SECONDS:
-                    _kill_process_tree(proc)
-                    stall_reason = (
-                        f"Watchdog: no progress for {self.STALL_SECONDS}s"
-                    )
-                    break
-                try:
-                    line = lines.get(timeout=0.25)
-                except queue.Empty:
-                    continue
-                if line is None:
-                    break
-                last_line_at = time.monotonic()
-                event = parse_ookla_line(line)
-                if event is None:
-                    continue
-                kind = event.get("type")
-                if kind == "testStart":
-                    client_label, server_label = labels_from_test_start(event)
-                elif kind == "log":
-                    msg = event.get("message")
-                    if msg:
-                        log_events.append(str(msg))
-                elif kind in ("ping", "download", "upload"):
-                    seen_progress = True
-                    prog = ookla_progress_event(event)
-                    if kind == "download":
-                        last_download_mbps = prog.get("download_mbps")
-                    elif kind == "upload":
-                        last_upload_mbps = prog.get("upload_mbps")
-                    emit(prog)
-                elif kind == "result":
-                    final = result_to_final(event, client_label, server_label, self.name)
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                _kill_process_tree(proc)
-        finally:
-            _kill_process_tree(proc)
-            # Collect stderr briefly so the tail is available for errors.
-            try:
-                proc.wait(timeout=2)
-            except Exception:
-                pass
-
-        if cancelled_result:
-            return None
-        detail_bits = []
-        if log_events:
-            detail_bits.append(" | ".join(log_events[-3:]))
-        err_text = "".join(stderr_lines).strip()
-        if err_text:
-            detail_bits.append(err_text[-500:])
-        detail = " ".join(detail_bits).strip()
-
-        def _partial():
-            return {
-                "download_mbps": round(last_download_mbps, 2)
-                if last_download_mbps is not None else None,
-                "upload_mbps": round(last_upload_mbps, 2)
-                if last_upload_mbps is not None else None,
-                "client": client_label,
-                "server": server_label,
-                "engine": self.name,
-                "detail": detail or None,
-            }
-
-        if stall_reason:
-            if seen_progress:
-                raise PartialTestError(stall_reason, _partial())
-            raise RuntimeError(stall_reason)
-        if proc.returncode not in (0, None):
-            if not seen_progress and final is None:
-                raise PreStartError(
-                    f"Ookla CLI failed before start (rc={proc.returncode})"
-                    + (f": {detail}" if detail else "")
-                )
-            if final is None:
-                msg = f"Ookla CLI failed mid-test (rc={proc.returncode})"
-                if detail:
-                    msg += f": {detail}"
-                raise PartialTestError(msg, _partial())
-        if final is None:
-            if not seen_progress:
-                raise PreStartError("Ookla CLI produced no progress events")
-            msg = "Ookla CLI finished without a result event"
-            if detail:
-                msg += f": {detail}"
-            raise PartialTestError(msg, _partial())
-        return final
-
-
-def _kill_process_tree(proc):
-    """Best-effort kill of the child tree; never leave orphans."""
-    if proc.poll() is not None:
-        return
-    try:
-        subprocess.run(
-            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-            capture_output=True, timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    try:
-        proc.terminate()
-    except Exception:
-        pass
-    try:
-        proc.wait(timeout=5)
-    except (subprocess.TimeoutExpired, Exception):
-        try:
-            proc.kill()
-        except Exception:
-            pass
-
-
-def parse_ookla_line(line):
-    """Parse one JSONL line; unknown/malformed lines return None."""
-    line = (line or "").strip()
-    if not line:
-        return None
-    try:
-        obj = json.loads(line)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(obj, dict) or "type" not in obj:
-        return None
-    return obj
-
-
-def bandwidth_to_mbps(bandwidth_bps):
-    """Ookla bandwidth (bytes/sec) to Mbps; None-safe."""
-    if bandwidth_bps is None:
-        return None
-    return round(float(bandwidth_bps) * 8.0 / 1_000_000, 3)
-
-
-def labels_from_test_start(event):
-    isp = event.get("isp") or "Unknown ISP"
-    iface = event.get("interface") or {}
-    server = event.get("server") or {}
-    # Never store MAC or internal IP; mask the external IP at source.
-    client = mask_ip(f"{isp} · {iface.get('externalIp') or '?'}")
-    name = server.get("name") or "Unknown host"
-    location = server.get("location") or "?"
-    country = server.get("country") or "?"
-    return client, f"{name} ({location}, {country})"
-
-
-def ookla_progress_event(event):
-    kind = event.get("type")
-    if kind == "ping":
-        ping = event.get("ping") or {}
-        return {"phase": "ping", "ping_ms": ping.get("latency"),
-                "jitter_ms": ping.get("jitter")}
-    payload = event.get(kind) or {}
-    mbps = bandwidth_to_mbps(payload.get("bandwidth"))
-    if kind == "download":
-        return {"phase": "download", "download_mbps": mbps, "upload_mbps": None}
-    return {"phase": "upload", "download_mbps": None, "upload_mbps": mbps}
-
-
-def result_to_final(event, client_label, server_label, engine_name):
-    """Map an Ookla ``result`` event to the shared final-dict shape."""
-    download = event.get("download") or {}
-    upload = event.get("upload") or {}
-    ping = event.get("ping") or {}
-    if client_label is None or server_label is None:
-        test_event = {"isp": event.get("isp"),
-                      "interface": event.get("interface"),
-                      "server": event.get("server")}
-        c2, s2 = labels_from_test_start(test_event)
-        client_label = client_label or c2
-        server_label = server_label or s2
-    download_mbps = bandwidth_to_mbps(download.get("bandwidth"))
-    upload_mbps = bandwidth_to_mbps(upload.get("bandwidth"))
-    final = {
-        "download_mbps": round(download_mbps, 2) if download_mbps is not None else None,
-        "upload_mbps": round(upload_mbps, 2) if upload_mbps is not None else None,
-        "client": client_label,
-        "server": server_label,
-        "engine": engine_name,
-        "ping_ms": ping.get("latency"),
-        "jitter_ms": ping.get("jitter"),
-    }
-    return final
-
-
 def get_live_source(name=None):
     """Return the live source.
 
@@ -604,3 +221,13 @@ class _CountingResponse:
 
     def __getattr__(self, name):
         return getattr(self._resp, name)
+
+
+# Re-exports so existing callers/tests keep working after the split.
+__all__ = [
+    "LiveDataSource", "PreStartError", "PartialTestError", "watchdog_seconds",
+    "SpeedtestCLILiveSource", "get_live_source", "mask_ip",
+    "find_ookla_binary", "kill_process_tree", "OoklaLiveSource",
+    "parse_ookla_line", "bandwidth_to_mbps", "ookla_progress_event",
+    "labels_from_test_start", "result_to_final",
+]
