@@ -40,7 +40,11 @@ CREATE TABLE IF NOT EXISTS measurements (
     jitter_ms REAL,
     server TEXT,
     client TEXT,
-    engine TEXT
+    engine TEXT,
+    server_idle_ms REAL,
+    server_loaded_ms REAL,
+    server_jitter_ms REAL,
+    server_target TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_measurements_ts ON measurements (timestamp);
 
@@ -65,9 +69,18 @@ CREATE TABLE IF NOT EXISTS failed_tests (
     server TEXT,
     client TEXT,
     engine TEXT,
-    reason TEXT
+    reason TEXT,
+    server_idle_ms REAL,
+    server_loaded_ms REAL,
+    server_jitter_ms REAL,
+    server_target TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_failed_ts ON failed_tests (timestamp);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -97,6 +110,19 @@ _MIGRATION_COLUMNS = {
     "server": "TEXT",
     "client": "TEXT",
     "engine": "TEXT",
+    # Latency measured against the test server itself (Ookla), kept
+    # separate from the 1.1.1.1 numbers so both can be labelled.
+    "server_idle_ms": "REAL",
+    "server_loaded_ms": "REAL",
+    "server_jitter_ms": "REAL",
+    "server_target": "TEXT",
+}
+
+_FAILED_TEST_MIGRATION_COLUMNS = {
+    "server_idle_ms": "REAL",
+    "server_loaded_ms": "REAL",
+    "server_jitter_ms": "REAL",
+    "server_target": "TEXT",
 }
 
 
@@ -111,6 +137,37 @@ def init_db(db_path=DEFAULT_DB_PATH):
         for col, kind in _MIGRATION_COLUMNS.items():
             if col not in cols:
                 conn.execute(f"ALTER TABLE measurements ADD COLUMN {col} {kind}")
+        failed_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(failed_tests)").fetchall()
+        }
+        for col, kind in _FAILED_TEST_MIGRATION_COLUMNS.items():
+            if col not in failed_cols:
+                conn.execute(f"ALTER TABLE failed_tests ADD COLUMN {col} {kind}")
+
+
+def get_setting(key, default=None, db_path=DEFAULT_DB_PATH):
+    """Read a setting value. Returns default when missing."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row and row["value"] is not None else default
+
+
+def set_setting(key, value, db_path=DEFAULT_DB_PATH):
+    """Write a setting value (NULL removes it)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if value is None:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
 
 
 def insert_measurement(data, db_path=DEFAULT_DB_PATH):
@@ -118,7 +175,8 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
 
     Required key: timestamp. Optional keys: download_mbps, upload_mbps,
     ping_cloudflare_ms, loss_cloudflare_pct, ping_google_ms,
-    loss_google_pct, loaded_ms, jitter_ms, server, client, engine.
+    loss_google_pct, loaded_ms, jitter_ms, server, client, engine,
+    server_idle_ms, server_loaded_ms, server_jitter_ms, server_target.
     Missing optional keys are stored as NULL (rendered as "–").
     Returns the new row id.
     """
@@ -129,8 +187,9 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
                (timestamp, download_mbps, upload_mbps,
                 ping_cloudflare_ms, loss_cloudflare_pct,
                 ping_google_ms, loss_google_pct,
-                loaded_ms, jitter_ms, server, client, engine)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                loaded_ms, jitter_ms, server, client, engine,
+                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 _iso(data["timestamp"]),
                 data.get("download_mbps"),
@@ -144,6 +203,10 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
                 data.get("server"),
                 data.get("client"),
                 data.get("engine"),
+                data.get("server_idle_ms"),
+                data.get("server_loaded_ms"),
+                data.get("server_jitter_ms"),
+                data.get("server_target"),
             ),
         )
         return cur.lastrowid
@@ -173,8 +236,9 @@ def insert_failed_test(data, db_path=DEFAULT_DB_PATH):
                (timestamp, download_mbps, upload_mbps,
                 ping_cloudflare_ms, loss_cloudflare_pct,
                 ping_google_ms, loss_google_pct,
-                loaded_ms, jitter_ms, server, client, engine, reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                loaded_ms, jitter_ms, server, client, engine, reason,
+                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 _iso(data["timestamp"]),
                 data.get("download_mbps"),
@@ -189,6 +253,10 @@ def insert_failed_test(data, db_path=DEFAULT_DB_PATH):
                 data.get("client"),
                 data.get("engine"),
                 data.get("reason"),
+                data.get("server_idle_ms"),
+                data.get("server_loaded_ms"),
+                data.get("server_jitter_ms"),
+                data.get("server_target"),
             ),
         )
         return cur.lastrowid

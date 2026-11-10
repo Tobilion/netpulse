@@ -8,9 +8,13 @@ from datetime import datetime, timedelta
 from flask import Flask, Response, jsonify, render_template, request
 
 import db
+import insights
+import log_query
 import logger
 
 app = Flask(__name__)
+# Local-only tool: pick up template edits without restarting the server.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
 @app.after_request
@@ -70,6 +74,175 @@ def api_data():
         "hourly_avg_download": hourly_avg,
         "last_measured": last_measured,
     })
+
+
+# ── Log (unified history + filters + CSV) ─────────────────────────────────
+@app.route("/api/log")
+def api_log():
+    filters = log_query.parse_filters(request.args)
+    entries, medians = log_query.query_log(filters)
+    return jsonify({
+        "entries": entries,
+        "medians": medians,
+        "filters": {
+            "range": filters["range"],
+            "type": filters["type"],
+            "engine": filters["engine"],
+            "sort": filters["sort"],
+            "min_speed": filters["min_speed"],
+            "max_speed": filters["max_speed"],
+            "from": filters["since"].isoformat(sep=" ") if filters["since"] else None,
+            "to": filters["until"].isoformat(sep=" ") if filters["until"] else None,
+        },
+    })
+
+
+@app.route("/api/log.csv")
+def api_log_csv():
+    filters = log_query.parse_filters(request.args)
+    entries, _ = log_query.query_log(filters)
+    body = log_query.to_csv(entries)
+    return Response(
+        body,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=netpulse-log.csv"},
+    )
+
+
+# ── Settings (advertised plan speed) ──────────────────────────────────────
+@app.route("/api/settings")
+def api_settings_get():
+    return jsonify({"plan_speed_mbps": db.get_setting("plan_speed_mbps")})
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_post():
+    body = request.get_json(silent=True) or {}
+    raw = body.get("plan_speed_mbps")
+    if raw in (None, ""):
+        db.set_setting("plan_speed_mbps", None)
+        return jsonify({"plan_speed_mbps": None})
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Plan speed must be a number in Mbps."}), 400
+    if value <= 0 or value > 100000:
+        return jsonify({"error": "Plan speed must be a positive number of Mbps."}), 400
+    db.set_setting("plan_speed_mbps", value)
+    return jsonify({"plan_speed_mbps": value})
+
+
+# ── Insights (health, compatibility, heatmap, % of plan) ─────────────────
+@app.route("/api/insights")
+def api_insights():
+    range_key = request.args.get("range", "7d")
+    delta = RANGE_MAP.get(range_key, RANGE_MAP["7d"])
+    since = datetime.now() - delta if delta else None
+
+    measurements = db.get_measurements(since=since)
+    outages = db.get_outages(since=since)
+    failed_tests = db.get_failed_tests(since=since)
+    true_outages = [o for o in outages if o.get("type") != "failed_test"]
+
+    plan_raw = db.get_setting("plan_speed_mbps")
+    plan = float(plan_raw) if plan_raw else None
+
+    latest = measurements[-1] if measurements else None
+    latest_engine = latest.get("engine") if latest else None
+    same_engine = [m for m in measurements if m.get("engine") == latest_engine]
+    own_median = insights.median([m.get("download_mbps") for m in same_engine])
+    target = plan if plan else own_median
+
+    cycles = len(measurements) + len(true_outages)
+    uptime = (len(measurements) / cycles * 100) if cycles else None
+
+    health = insights.compute_health(
+        uptime_pct=uptime,
+        failed_test_count=len(failed_tests),
+        cycle_count=cycles,
+        download_mbps=latest.get("download_mbps") if latest else None,
+        target_mbps=target,
+        idle_latency_ms=latest.get("ping_cloudflare_ms") if latest else None,
+        loss_pct=latest.get("loss_cloudflare_pct") if latest else None,
+        jitter_ms=latest.get("jitter_ms") if latest else None,
+    )
+
+    week_ago = datetime.now() - timedelta(days=insights.WORSE_THAN_USUAL_WINDOW_DAYS)
+    recent_same_engine = [
+        m for m in db.get_measurements(since=week_ago)
+        if m.get("engine") == latest_engine
+    ]
+    worse, median_7d = insights.worse_than_usual(
+        latest.get("download_mbps") if latest else None,
+        [m.get("download_mbps") for m in recent_same_engine],
+    )
+
+    heatmap = insights.build_heatmap(measurements, outages, days=90)
+
+    pct_of_plan = None
+    if plan and latest and latest.get("download_mbps") is not None:
+        pct_of_plan = round(latest["download_mbps"] / plan * 100, 1)
+
+    return jsonify({
+        "health": health,
+        "compatibility": insights.compute_compatibility(latest),
+        "heatmap": heatmap,
+        "worse_than_usual": {
+            "is_worse": bool(worse),
+            "median_mbps": median_7d,
+            "ratio": insights.WORSE_THAN_USUAL_RATIO,
+            "window_days": insights.WORSE_THAN_USUAL_WINDOW_DAYS,
+            "download_mbps": latest.get("download_mbps") if latest else None,
+        },
+        "plan": {
+            "plan_speed_mbps": plan,
+            "target_mbps": target,
+            "target_source": "plan" if plan else "same-engine median",
+            "pct_of_plan": pct_of_plan,
+            "own_median_mbps": own_median,
+        },
+        "latest": latest,
+    })
+
+
+# ── Light polling for new incidents (toast + Log prepend) ───────────────
+@app.route("/api/updates")
+def api_updates():
+    """Rows newer than `since` (timestamp string) for live toasts."""
+    since = request.args.get("since")
+    try:
+        cutoff = datetime.fromisoformat(since) if since else None
+    except ValueError:
+        cutoff = None
+
+    def _new(rows, kind):
+        out = []
+        for r in rows:
+            if cutoff is None:
+                continue
+            try:
+                when = datetime.fromisoformat(r["timestamp"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if when > cutoff:
+                out.append({
+                    "kind": kind,
+                    "id": r.get("id"),
+                    "timestamp": r.get("timestamp"),
+                    "reason": r.get("reason"),
+                })
+        return out
+
+    outages = db.get_outages()
+    failed = db.get_failed_tests()
+    events = _new(outages, "outage") + _new(failed, "failed_test")
+    events.sort(key=lambda e: e["timestamp"])
+    latest_ts = None
+    for group in (failed, outages):
+        for r in group:
+            if latest_ts is None or r["timestamp"] > latest_ts:
+                latest_ts = r["timestamp"]
+    return jsonify({"events": events, "latest_timestamp": latest_ts})
 
 
 # ── On-demand live speed test ────────────────────────────────────────────

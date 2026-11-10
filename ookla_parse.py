@@ -51,9 +51,14 @@ def ookla_progress_event(event):
                 "jitter_ms": ping.get("jitter")}
     payload = event.get(kind) or {}
     mbps = bandwidth_to_mbps(payload.get("bandwidth"))
+    # Ookla reports loaded latency to the test server as latency.iqm.
+    latency = payload.get("latency") or {}
+    loaded_ms = latency.get("iqm")
     if kind == "download":
-        return {"phase": "download", "download_mbps": mbps, "upload_mbps": None}
-    return {"phase": "upload", "download_mbps": None, "upload_mbps": mbps}
+        return {"phase": "download", "download_mbps": mbps, "upload_mbps": None,
+                "loaded_latency_ms": loaded_ms}
+    return {"phase": "upload", "download_mbps": None, "upload_mbps": mbps,
+            "loaded_latency_ms": loaded_ms}
 
 
 def result_to_final(event, client_label, server_label, engine_name):

@@ -103,6 +103,10 @@ def _insert_failed(timestamp, partial, pings, loaded=None, jitter=None,
                 "client": partial.get("client"),
                 "engine": partial.get("engine"),
                 "reason": reason or partial.get("detail"),
+                "server_idle_ms": partial.get("server_idle_ms"),
+                "server_loaded_ms": partial.get("server_loaded_ms"),
+                "server_jitter_ms": partial.get("server_jitter_ms"),
+                "server_target": partial.get("server_target"),
             },
             db_path=db_path,
         )
@@ -247,6 +251,9 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
         # Loaded latency: single pings while the sampler saturates the link.
         loaded_samples = []
         loaded_done = threading.Event()
+        # Latency reported by the test server itself (Ookla), kept apart
+        # from the 1.1.1.1 numbers.
+        server_latency = {}
         progress({"phase": "download"})
         report("download")
 
@@ -276,6 +283,11 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
             else:
                 progress({"phase": "download",
                           "download_mbps": event.get("download_mbps")})
+            # Latency measured against the test server itself (Ookla),
+            # stored separately from the 1.1.1.1 figures so both can be
+            # labelled with their target.
+            if event.get("loaded_latency_ms") is not None:
+                server_latency["loaded_ms"] = event["loaded_latency_ms"]
 
         def run_with_fallback(primary):
             # Fallback only when the primary failed before any progress:
@@ -374,6 +386,12 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
         "server": server_label,
         "client": client_label,
         "engine": engine_label,
+        # Latency measured to the test server itself (Ookla), labelled
+        # separately from the 1.1.1.1 figures above.
+        "server_idle_ms": result.get("ping_ms"),
+        "server_loaded_ms": server_latency.get("loaded_ms"),
+        "server_jitter_ms": result.get("jitter_ms"),
+        "server_target": server_label,
     }
     db.insert_measurement(data, db_path=db_path)
     return {
