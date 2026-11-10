@@ -1,0 +1,412 @@
+/* Stage 3 components: health score, compatibility, heatmap, log, settings. */
+
+/* ── Measure tab meta row ─────────────────────────────────────────────── */
+.measure-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  justify-content: center;
+}
+
+.worse-chip {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--warn);
+  border-radius: 100px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.plan-info {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.plan-line {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.plan-value {
+  font-weight: 800;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+
+.copy-summary {
+  background: var(--surface-2);
+  border: 1px solid var(--border-hover);
+  color: var(--text);
+  border-radius: 100px;
+  padding: 7px 16px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.copy-summary:hover {
+  border-color: var(--accent);
+}
+
+/* ── Insight cards ────────────────────────────────────────────────────── */
+.insight-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.insight-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+}
+
+.health-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.health-score {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.health-score-value {
+  font-size: 2.6rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.health-score-unit {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.health-excellent .health-score-value { color: var(--good); }
+.health-good .health-score-value { color: var(--accent); }
+.health-fair .health-score-value { color: #fbbf24; }
+.health-poor .health-score-value { color: var(--warn); }
+
+.health-verdict {
+  flex: 1;
+  min-width: 0;
+}
+
+.health-verdict-label {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.health-weights {
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.health-info {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 0.8rem;
+}
+
+.health-rows {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.health-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 5px;
+}
+
+.health-row-value {
+  font-weight: 700;
+}
+
+.health-formula {
+  margin-top: 14px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.6;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+/* ── Compatibility dots ───────────────────────────────────────────────── */
+.compat-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.86rem;
+}
+
+.compat-item:last-child {
+  border-bottom: none;
+}
+
+.compat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.compat-good .compat-dot { background: var(--good); }
+.compat-fair .compat-dot { background: #fbbf24; }
+.compat-poor .compat-dot { background: var(--warn); }
+
+.compat-label {
+  flex: 1;
+  font-weight: 600;
+}
+
+.compat-status {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* ── Uptime heatmap ───────────────────────────────────────────────────── */
+.heat-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3px;
+}
+
+.heat-cell {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.heat-excellent { background: var(--good); }
+.heat-good { background: #34d39999; }
+.heat-fair { background: #fbbf24; }
+.heat-poor { background: var(--warn); }
+.heat-no_data { background: var(--surface-2); border: 1px solid var(--border); }
+
+.heat-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.heat-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heat-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* ── Log tab ──────────────────────────────────────────────────────────── */
+.log-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin: 16px 0;
+}
+
+.log-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.log-filters select,
+.log-filters input {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.log-custom {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.log-export {
+  background: var(--surface-2);
+  border: 1px solid var(--border-hover);
+  color: var(--text);
+  border-radius: 100px;
+  padding: 8px 16px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.log-summary {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 100px 90px 150px;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.log-row:hover {
+  border-color: var(--accent);
+}
+
+.log-type {
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.log-outage .log-type { color: var(--warn); }
+.log-failed_test .log-type { color: #fbbf24; }
+.log-measurement .log-type { color: var(--good); }
+
+.log-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-speed {
+  font-weight: 700;
+  text-align: right;
+}
+
+.log-latency {
+  color: var(--muted);
+  text-align: right;
+}
+
+.log-engine {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Settings ─────────────────────────────────────────────────────────── */
+.settings-row {
+  margin: 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.settings-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.settings-row input[type="number"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  width: 180px;
+}
+
+.settings-help {
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 520px;
+  line-height: 1.6;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.settings-save,
+.settings-clear {
+  background: var(--surface-2);
+  border: 1px solid var(--border-hover);
+  color: var(--text);
+  border-radius: 100px;
+  padding: 8px 18px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.settings-save:hover {
+  border-color: var(--accent);
+}
+
+.settings-status {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .log-row {
+    grid-template-columns: 90px 1fr 80px;
+  }
+  .log-latency,
+  .log-engine {
+    display: none;
+  }
+}

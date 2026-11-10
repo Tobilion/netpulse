@@ -1,8 +1,8 @@
 /* ══════════════════════════════════════════════════════
    NetPulse — app.js (slim orchestrator)
    Data fetch · render pipeline · wiring.
-   Rendering lives in stats.js / outages.js; tabs/theme in
-   tabs.js / theme.js so this file stays under 400 lines.
+   Rendering lives in stats.js / outages.js / log.js /
+   insights.js / settings.js; tabs/theme in tabs.js / theme.js.
    ══════════════════════════════════════════════════════ */
 
 import {
@@ -23,6 +23,16 @@ import { initTheme } from './theme.js';
 import { initTabs, currentTab } from './tabs.js';
 import { renderStatCards } from './stats.js';
 import { renderOutages } from './outages.js';
+import { LogView } from './log.js';
+import { SettingsView } from './settings.js';
+import {
+  renderCompatibility,
+  renderHealth,
+  renderHeatmap,
+  renderPlanInfo,
+  renderWorseChip,
+} from './insights.js';
+import { formatLatency, formatSpeedText } from './format.js';
 
 import {
   destroyCharts,
@@ -31,15 +41,18 @@ import {
   buildHourlyChart,
 } from './charts.js';
 
-import { formatSpeedText } from './format.js';
-
 /* ── STATE ──────────────────────────────────────────── */
 let currentRange = '7d';
 let currentEngine = 'all';
 let heroScrambled = false;
 let lastData = null;
+let lastInsights = null;
 
 const PILL_POLL_MS = 60_000;
+const INCIDENT_POLL_MS = 20_000;
+
+const logView = new LogView();
+const settingsView = new SettingsView();
 
 /* ── FORMATTERS ─────────────────────────────────────── */
 function timeAgo(isoStr) {
@@ -135,6 +148,21 @@ async function loadData(range) {
   }
 }
 
+async function loadInsights() {
+  try {
+    const res = await fetch(`/api/insights?range=${encodeURIComponent(currentRange)}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    lastInsights = await res.json();
+    renderHealth(document.getElementById('healthCard'), lastInsights.health);
+    renderCompatibility(document.getElementById('compatCard'), lastInsights.compatibility);
+    renderPlanInfo(document.getElementById('planInfo'), lastInsights.plan);
+    renderWorseChip(document.getElementById('worseChip'), lastInsights.worse_than_usual);
+    renderHeatmap(document.getElementById('heatmapMount'), lastInsights.heatmap);
+  } catch (err) {
+    console.error('[NetPulse] insights load error:', err);
+  }
+}
+
 async function refreshPill() {
   try {
     const res = await fetch(`/api/data?range=${encodeURIComponent(currentRange)}`, { cache: 'no-store' });
@@ -147,6 +175,67 @@ async function refreshPill() {
   } catch {}
 }
 
+/* ── LIVE INCIDENT TOASTS ────────────────────────────── */
+let lastIncidentTimestamp = null;
+
+async function pollIncidents() {
+  try {
+    const url = lastIncidentTimestamp
+      ? `/api/updates?since=${encodeURIComponent(lastIncidentTimestamp)}`
+      : '/api/updates';
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.latest_timestamp) lastIncidentTimestamp = data.latest_timestamp;
+    const events = data.events || [];
+    if (!events.length) return;
+    for (const ev of events) {
+      const kind = ev.kind === 'outage' ? 'Outage recorded' : 'Test failed';
+      showToast('error', `${kind} — ${ev.reason || 'no reason given'} (${ev.timestamp})`);
+    }
+    logView.prependEntries(events.map((ev) => ({
+      kind: ev.kind, id: ev.id, timestamp: ev.timestamp, reason: ev.reason,
+      download_mbps: null, upload_mbps: null, ping_cloudflare_ms: null,
+      loaded_ms: null, jitter_ms: null, loss_cloudflare_pct: null,
+      engine: null, server: null, client: null,
+    })));
+    loadData(currentRange);
+  } catch {
+    // Transient error — the next tick retries.
+  }
+}
+
+/* ── COPY SUMMARY ───────────────────────────────────── */
+function copySummary() {
+  const latest = lastInsights && lastInsights.latest;
+  if (!latest) {
+    showToast('info', 'No measurement to summarise yet.');
+    return;
+  }
+  const lines = [
+    'NetPulse result',
+    `When: ${latest.timestamp}`,
+    `Download: ${formatSpeedText(latest.download_mbps)}`,
+    `Upload: ${formatSpeedText(latest.upload_mbps)}`,
+    `Idle latency (1.1.1.1): ${formatLatency(latest.ping_cloudflare_ms)}`,
+    `Loaded latency (1.1.1.1): ${formatLatency(latest.loaded_ms)}`,
+    `Jitter (1.1.1.1): ${formatLatency(latest.jitter_ms)}`,
+    `Engine: ${latest.engine || '–'}`,
+    `Server: ${latest.server || '–'}`,
+  ];
+  const plan = lastInsights.plan || {};
+  if (plan.plan_speed_mbps && plan.pct_of_plan != null) {
+    lines.push(`% of plan (${plan.plan_speed_mbps} Mbps): ${plan.pct_of_plan}%`);
+  }
+  if (lastInsights.health) {
+    lines.push(`Health score: ${lastInsights.health.score}/100 (${lastInsights.health.verdict})`);
+  }
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('success', 'Result summary copied (no IP included).'))
+    .catch(() => showToast('error', 'Could not copy the summary.'));
+}
+
 /* ── BOOT ────────────────────────────────────────────── */
 function init() {
   initTheme();
@@ -157,6 +246,7 @@ function init() {
     initTubelightNav(nav, (range) => {
       currentRange = range;
       loadData(currentRange);
+      loadInsights();
     });
     nav.querySelectorAll('button').forEach((b) => b.classList.add('magnetic-btn'));
     initMagneticButtons();
@@ -168,21 +258,33 @@ function init() {
       loadData(currentRange);
     });
   }
+  logView.init();
+  settingsView.init();
   initTabs((tab) => {
     if (tab === 'trends' && lastData) buildChartsFor(lastData, 'trends');
+    if (tab === 'log') logView.load();
+    if (tab === 'settings') settingsView.load();
   });
   const gaugeMount = document.getElementById('liveTestMount');
   if (gaugeMount) {
-    const gauge = new SpeedTestGauge(gaugeMount, { onComplete: () => loadData(currentRange) });
+    const gauge = new SpeedTestGauge(gaugeMount, { onComplete: () => { loadData(currentRange); loadInsights(); } });
     gauge.render();
     initSpotlightCards();
     initMagneticButtons();
   }
+  const copyBtn = document.getElementById('copySummary');
+  if (copyBtn) copyBtn.addEventListener('click', copySummary);
   window.addEventListener('netpulse:theme', () => {
     if (lastData) buildChartsFor(lastData, currentTab());
   });
+  window.addEventListener('netpulse:settings', () => {
+    loadInsights();
+    loadData(currentRange);
+  });
   loadData(currentRange);
+  loadInsights();
   setInterval(refreshPill, PILL_POLL_MS);
+  setInterval(pollIncidents, INCIDENT_POLL_MS);
 }
 
 document.addEventListener('DOMContentLoaded', init);
