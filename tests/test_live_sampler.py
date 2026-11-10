@@ -40,8 +40,11 @@ def test_parse_download_bandwidth_bytes_to_mbps():
 def test_parse_upload():
     event = live_sampler.parse_ookla_line(UPLOAD)
     progress = live_sampler.ookla_progress_event(event)
-    assert progress == {"phase": "upload", "download_mbps": None,
-                        "upload_mbps": pytest.approx(2.472, abs=0.001)}
+    assert progress["phase"] == "upload"
+    assert progress["download_mbps"] is None
+    assert progress["upload_mbps"] == pytest.approx(2.472, abs=0.001)
+    # Ookla's loaded latency to the test server rides along as iqm.
+    assert progress["loaded_latency_ms"] == 545.229
 
 
 def test_result_to_final():

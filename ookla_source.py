@@ -177,6 +177,7 @@ class OoklaLiveSource(LiveDataSource):
         seen_progress = False
         last_download_mbps = None
         last_upload_mbps = None
+        last_loaded_latency_ms = None
         log_events = []
         started = time.monotonic()
         last_line_at = started
@@ -221,6 +222,8 @@ class OoklaLiveSource(LiveDataSource):
                         last_download_mbps = prog.get("download_mbps")
                     elif kind == "upload":
                         last_upload_mbps = prog.get("upload_mbps")
+                    if prog.get("loaded_latency_ms") is not None:
+                        last_loaded_latency_ms = prog["loaded_latency_ms"]
                     emit(prog)
                 elif kind == "result":
                     final = result_to_final(event, client_label, server_label, self.name)
@@ -255,6 +258,8 @@ class OoklaLiveSource(LiveDataSource):
                 "server": server_label,
                 "engine": self.name,
                 "detail": detail or None,
+                "server_loaded_ms": last_loaded_latency_ms,
+                "server_target": server_label,
             }
 
         if stall_reason:

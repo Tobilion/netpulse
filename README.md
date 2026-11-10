@@ -73,23 +73,25 @@ To log measurements automatically every 30 minutes without keeping a terminal op
 ```
 netpulse/
 ├── main.py               # CLI entry point (once / watch / export / demo / serve)
-├── logger.py             # one measurement cycle: speed test + pings
-├── db.py                 # SQLite storage layer
-├── dashboard.py          # Flask app + /api/data JSON endpoint
+├── logger.py             # measurement cycle: pings + engine, live cycle
+├── db.py                 # SQLite storage, additive migrations, settings, stats
+├── live_sampler.py       # engine selection + Python byte-counter source
+├── ookla_source.py       # Ookla CLI source (JSONL progress), process-tree kill
+├── ookla_parse.py        # pure Ookla JSONL parsing
+├── sources_base.py       # shared source interface + errors
+├── insights.py           # health score, compatibility, uptime heatmap
+├── log_query.py          # unified Log query + filters + CSV export
+├── dashboard.py          # Flask app, API, SSE stream, watchdog
 ├── templates/
-│   └── dashboard.html    # Lean HTML shell (no inline CSS/JS)
+│   └── dashboard.html    # HTML shell (tabs, panels; no inline CSS/JS)
 ├── static/
-│   ├── css/
-│   │   ├── main.css      # Design tokens, layout, hero, cards, footer
-│   │   └── components.css # Nav, toast, modal, skeleton, empty state, ring
-│   └── js/
-│       ├── components.js # 13 reusable UI components (ES module)
-│       ├── charts.js     # Chart.js config, gradients, draw animation
-│       └── app.js        # Data fetch, render pipeline, component wiring
-├── tests/
-│   └── test_db.py        # pytest suite for the db module
+│   ├── css/              # main · components · themes · tabs · insights
+│   └── js/               # app · components · charts · format · speedtest ·
+│                         # gauge-view · gauge-scale · stats · outages · log ·
+│                         # settings · insights · tabs · theme
+├── tests/                # pytest suite + puppeteer browser guards
 ├── requirements.txt
-└── netpulse.db           # created on first run (git-ignored)
+└── netpulse.db           # live data (git-ignored, untracked)
 ```
 
 ## Running the tests
