@@ -104,6 +104,21 @@ def _run_sampler_result(source, on_progress=None, should_cancel=None):
     def _run(src):
         return src.run(on_progress=on_progress, should_cancel=should_cancel)
 
+    def _try_cloudflare(reason):
+        """Last resort: measure against the nearest Cloudflare edge.
+
+        A different operator from Ookla (so Ookla's usage limit does not
+        apply) and, from Lagos, the nearest edge is Cloudflare's Lagos
+        PoP -- a genuinely local path.
+        """
+        try:
+            result = _run(live_sampler.CloudflareLiveSource())
+            return result, f"{reason}; used Cloudflare edge fallback"
+        except live_sampler.CloudflareError as exc:
+            raise live_sampler.SkippedRun(
+                f"{reason}; Cloudflare fallback failed: {exc}"
+            ) from exc
+
     try:
         result = _run(source)
         if isinstance(source, live_sampler.OoklaLiveSource):
@@ -114,31 +129,30 @@ def _run_sampler_result(source, on_progress=None, should_cancel=None):
         reason = (f"primary engine rate-limited: {exc} "
                   f"(backing off {delay // 60} min)")
         if isinstance(source, live_sampler.SpeedtestCLILiveSource):
-            raise live_sampler.SkippedRun(reason) from exc
+            return _try_cloudflare(reason)
         try:
             fallback = live_sampler.SpeedtestCLILiveSource()
             result = _run(fallback)
             return result, reason
-        except live_sampler.ForeignServerError as foreign:
-            raise live_sampler.SkippedRun(
-                f"{reason}; fallback has no server in {live_sampler.home_country().title()}"
-            ) from foreign
+        except live_sampler.ForeignServerError:
+            return _try_cloudflare(
+                f"{reason}; speedtest.net has no server in "
+                f"{live_sampler.home_country().title()}")
     except live_sampler.ForeignServerError as exc:
-        # We never measure to a server outside the home country, whichever
-        # engine asked for it: skip the cycle instead of storing a row that
-        # describes another country's path.
-        raise live_sampler.SkippedRun(str(exc)) from exc
+        # speedtest.net cannot reach a local server for this connection;
+        # measure against the nearest Cloudflare edge instead of skipping.
+        return _try_cloudflare(str(exc))
     except live_sampler.PreStartError as exc:
         reason = f"primary engine unavailable: {exc}"
         if isinstance(source, live_sampler.SpeedtestCLILiveSource):
-            raise live_sampler.SkippedRun(reason) from exc
+            return _try_cloudflare(reason)
         fallback = live_sampler.SpeedtestCLILiveSource()
         try:
             return _run(fallback), reason
-        except live_sampler.ForeignServerError as foreign:
-            raise live_sampler.SkippedRun(
-                f"{reason}; fallback has no server in {live_sampler.home_country().title()}"
-            ) from foreign
+        except live_sampler.ForeignServerError:
+            return _try_cloudflare(
+                f"{reason}; speedtest.net has no server in "
+                f"{live_sampler.home_country().title()}")
 
 
 def _insert_failed(timestamp, partial, pings, loaded=None, jitter=None,
@@ -366,7 +380,18 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
 
         def run_with_fallback(primary):
             # Fallback only when the primary failed before any progress:
-            # retry once with the Python source, never mid-test.
+            # Ookla -> speedtest-cli (local servers only) -> Cloudflare edge.
+            # Never mid-test.
+            def _try_cloudflare(reason):
+                try:
+                    result = live_sampler.CloudflareLiveSource().run(
+                        on_progress=merge_speed, should_cancel=should_cancel)
+                    return result, f"{reason}; used Cloudflare edge fallback"
+                except live_sampler.CloudflareError as exc:
+                    raise live_sampler.SkippedRun(
+                        f"{reason}; Cloudflare fallback failed: {exc}"
+                    ) from exc
+
             try:
                 result = primary.run(on_progress=merge_speed, should_cancel=should_cancel)
                 if isinstance(primary, live_sampler.OoklaLiveSource):
@@ -374,39 +399,37 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
                 return result, None
             except live_sampler.RateLimitedError as exc:
                 delay = live_sampler.note_rate_limit()
-                fallback_reason[0] = (
-                    f"primary engine rate-limited: {exc} "
-                    f"(backing off {delay // 60} min)"
-                )
+                reason = (f"primary engine rate-limited: {exc} "
+                          f"(backing off {delay // 60} min)")
+                fallback_reason[0] = reason
                 if isinstance(primary, live_sampler.SpeedtestCLILiveSource):
-                    raise live_sampler.SkippedRun(fallback_reason[0]) from exc
+                    return _try_cloudflare(reason)
                 try:
                     fallback = live_sampler.SpeedtestCLILiveSource()
                     return (fallback.run(on_progress=merge_speed,
                                          should_cancel=should_cancel),
-                            fallback_reason[0])
-                except live_sampler.ForeignServerError as foreign:
-                    raise live_sampler.SkippedRun(
-                        f"{fallback_reason[0]}; fallback has no server in "
-                        f"{live_sampler.home_country().title()}"
-                    ) from foreign
+                            reason)
+                except live_sampler.ForeignServerError:
+                    return _try_cloudflare(
+                        f"{reason}; speedtest.net has no server in "
+                        f"{live_sampler.home_country().title()}")
             except live_sampler.ForeignServerError as exc:
-                # Never measure to a server outside the home country.
-                raise live_sampler.SkippedRun(str(exc)) from exc
+                # speedtest.net cannot reach a local server for this
+                # connection; measure against the nearest Cloudflare edge.
+                return _try_cloudflare(str(exc))
             except live_sampler.PreStartError:
                 if isinstance(primary, live_sampler.SpeedtestCLILiveSource):
-                    raise
+                    return _try_cloudflare("primary engine unavailable")
                 fallback_reason[0] = "primary engine unavailable"
                 fallback = live_sampler.SpeedtestCLILiveSource()
                 try:
                     return (fallback.run(on_progress=merge_speed,
                                          should_cancel=should_cancel),
                             fallback_reason[0])
-                except live_sampler.ForeignServerError as foreign:
-                    raise live_sampler.SkippedRun(
-                        f"fallback has no server in "
-                        f"{live_sampler.home_country().title()}"
-                    ) from foreign
+                except live_sampler.ForeignServerError:
+                    return _try_cloudflare(
+                        f"{fallback_reason[0]}; speedtest.net has no server in "
+                        f"{live_sampler.home_country().title()}")
             except live_sampler.PartialTestError as exc:
                 if exc.partial.get("download_mbps") is not None:
                     # Keep the partial; don't retry mid-test.

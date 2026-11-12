@@ -78,16 +78,23 @@ collector keeps running the code it was started with.
 
 ## Which engine runs
 
-Ookla's CLI is used first; the Python `speedtest-cli` is only a fallback
-when Ookla is missing or rate-limited. Two rules keep the data honest:
+Three engines, tried in order, and the **first one that can produce a
+local measurement wins**:
 
-- **Never measure to a server in another country.** `speedtest-cli`
-  picks the nearest server to the IP's geolocated position, which from
-  this network is usually Germany or the Netherlands. Those runs are
-  refused, and the cycle is recorded as *skipped* (not a measurement,
-  not an outage).
-- **Rate limits back off.** After an Ookla usage limit the engine waits
-  15 minutes, then 30, then 60 (capped) before trying again.
+1. **Ookla CLI** — picks Lagos servers (Spectranet, Melbicom). Ookla's
+   CLI has a personal-use rate limit; when it is hit the engine backs off
+   (15 → 30 → 60 minutes).
+2. **speedtest-cli** — only used when it can reach a server in your
+   country. It picks servers by distance to your IP's geolocated
+   position, and speedtest.net geolocates this connection to Europe, so
+   it usually offers London/Berlin servers. Those are refused rather
+   than stored, because they measure another country's path.
+3. **Cloudflare edge** — measures real throughput against the nearest
+   Cloudflare PoP (Lagos from here). Different operator, so Ookla's rate
+   limit does not apply, and the path is local.
+
+A cycle is only recorded as **skipped** (not a measurement, not an
+outage) when every engine fails.
 
 Set `NETPULSE_HOME_COUNTRY` if your connection is not in Nigeria.
 

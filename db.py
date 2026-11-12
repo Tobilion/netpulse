@@ -203,8 +203,9 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
     Required key: timestamp. Optional keys: download_mbps, upload_mbps,
     ping_cloudflare_ms, loss_cloudflare_pct, ping_google_ms,
     loss_google_pct, loaded_ms, jitter_ms, server, client, engine,
-    server_idle_ms, server_loaded_ms, server_jitter_ms, server_target.
-    Missing optional keys are stored as NULL (rendered as "–").
+    server_idle_ms, server_loaded_ms, server_jitter_ms, server_target,
+    fallback_reason.
+    Missing optional keys are stored as NULL (rendered as "\u2013").
     Returns the new row id.
     """
     init_db(db_path)
@@ -215,8 +216,9 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
                 ping_cloudflare_ms, loss_cloudflare_pct,
                 ping_google_ms, loss_google_pct,
                 loaded_ms, jitter_ms, server, client, engine,
-                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target,
+                fallback_reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 _iso(data["timestamp"]),
                 data.get("download_mbps"),
@@ -234,6 +236,7 @@ def insert_measurement(data, db_path=DEFAULT_DB_PATH):
                 data.get("server_loaded_ms"),
                 data.get("server_jitter_ms"),
                 data.get("server_target"),
+                data.get("fallback_reason"),
             ),
         )
         return cur.lastrowid
@@ -264,8 +267,9 @@ def insert_failed_test(data, db_path=DEFAULT_DB_PATH):
                 ping_cloudflare_ms, loss_cloudflare_pct,
                 ping_google_ms, loss_google_pct,
                 loaded_ms, jitter_ms, server, client, engine, reason,
-                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                server_idle_ms, server_loaded_ms, server_jitter_ms, server_target,
+                fallback_reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 _iso(data["timestamp"]),
                 data.get("download_mbps"),
@@ -284,6 +288,7 @@ def insert_failed_test(data, db_path=DEFAULT_DB_PATH):
                 data.get("server_loaded_ms"),
                 data.get("server_jitter_ms"),
                 data.get("server_target"),
+                data.get("fallback_reason"),
             ),
         )
         return cur.lastrowid

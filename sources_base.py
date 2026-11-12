@@ -51,6 +51,31 @@ def home_country():
     return (os.environ.get("NETPULSE_HOME_COUNTRY") or "Nigeria").strip().lower()
 
 
+# ISO 3166-1 alpha-2 codes for the countries we can name directly.
+COUNTRY_CODES = {
+    "nigeria": "NG", "ghana": "GH", "kenya": "KE", "south africa": "ZA",
+    "united kingdom": "GB", "united states": "US", "india": "IN",
+    "canada": "CA", "germany": "DE", "netherlands": "NL", "spain": "ES",
+    "israel": "IL", "france": "FR", "brazil": "BR", "nigeria ": "NG",
+}
+
+
+def home_country_code():
+    """ISO code for the home country (e.g. Nigeria -> NG)."""
+    return COUNTRY_CODES.get(home_country(), home_country()[:2].upper())
+
+
+def country_name(code):
+    """Country name for an ISO code, falling back to the code itself."""
+    code = (code or "").strip()
+    if not code:
+        return code
+    for name, iso in COUNTRY_CODES.items():
+        if iso == code.upper():
+            return name.title()
+    return code
+
+
 def server_country(label):
     """Country from a server label like 'Melbicom (Lagos, Nigeria)'."""
     if not label or "(" not in label:

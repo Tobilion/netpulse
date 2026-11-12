@@ -24,6 +24,7 @@ from ookla_parse import (
     parse_ookla_line,
     result_to_final,
 )
+from cloudflare_source import CloudflareError, CloudflareLiveSource
 from ookla_source import OoklaLiveSource, find_ookla_binary, kill_process_tree, mask_ip
 from sources_base import (
     ForeignServerError,
@@ -293,4 +294,5 @@ __all__ = [
     "labels_from_test_start", "result_to_final",
     "ForeignServerError", "RateLimitedError", "SkippedRun",
     "home_country", "server_country", "server_is_local",
+    "CloudflareLiveSource", "CloudflareError",
 ]

@@ -134,27 +134,62 @@ class _ForeignSource:
             "speedtest-cli can only reach TKRZ Stadtwerke GmbH (Emsdetten, Germany)")
 
 
-def test_rate_limited_primary_with_foreign_fallback_skips_the_cycle(dbl, monkeypatch):
+class _CloudflareOK:
+    """Stand-in for the Cloudflare edge fallback."""
+
+    name = "cloudflare-edge LOS"
+
+    def run(self, on_progress=None, should_cancel=None):
+        return {"download_mbps": 12.5, "upload_mbps": 4.25, "client": None,
+                "server": "Cloudflare LOS (Nigeria)",
+                "engine": "cloudflare-edge LOS", "ping_ms": 24.0,
+                "jitter_ms": None, "detail": "Cloudflare edge LOS"}
+
+
+class _CloudflareFails:
+    name = "cloudflare-edge"
+
+    def run(self, on_progress=None, should_cancel=None):
+        raise live_sampler.CloudflareError("download failed: timeout")
+
+
+def test_rate_limited_primary_falls_back_to_cloudflare(dbl, monkeypatch):
+    """A rate limit must not end the cycle when a local edge is reachable."""
     monkeypatch.setattr(logger, "run_ping", lambda host, count=10: (20.0, 0.0))
     monkeypatch.setattr(live_sampler, "get_live_source", lambda: _RateLimitedSource())
     monkeypatch.setattr(live_sampler, "SpeedtestCLILiveSource", _ForeignSource)
+    monkeypatch.setattr(live_sampler, "CloudflareLiveSource", _CloudflareOK)
+    result = logger.run_cycle(db_path=dbl)
+    assert result["status"] == "ok", result
+    assert result["engine"] == "cloudflare-edge LOS"
+    assert "Cloudflare edge fallback" in (result.get("fallback_reason") or "")
+    assert len(db.get_measurements(db_path=dbl)) == 1
+    assert db.get_outages(db_path=dbl) == []
+
+
+def test_foreign_server_falls_back_to_cloudflare(dbl, monkeypatch):
+    monkeypatch.setattr(logger, "run_ping", lambda host, count=10: (20.0, 0.0))
+    monkeypatch.setattr(live_sampler, "get_live_source", lambda: _ForeignSource())
+    monkeypatch.setattr(live_sampler, "CloudflareLiveSource", _CloudflareOK)
+    result = logger.run_cycle(db_path=dbl)
+    assert result["status"] == "ok", result
+    assert result["server"] == "Cloudflare LOS (Nigeria)"
+    assert len(db.get_measurements(db_path=dbl)) == 1
+    assert db.get_outages(db_path=dbl) == []
+
+
+def test_skipped_only_when_every_engine_fails(dbl, monkeypatch):
+    """Only when all engines fail is the cycle skipped (not an outage)."""
+    monkeypatch.setattr(logger, "run_ping", lambda host, count=10: (20.0, 0.0))
+    monkeypatch.setattr(live_sampler, "get_live_source", lambda: _ForeignSource())
+    monkeypatch.setattr(live_sampler, "CloudflareLiveSource", _CloudflareFails)
     result = logger.run_cycle(db_path=dbl)
     assert result["status"] == "skipped"
     assert db.get_measurements(db_path=dbl) == []
     assert db.get_outages(db_path=dbl) == []
     skipped = db.get_skipped_runs(db_path=dbl)
     assert len(skipped) == 1
-    assert "rate-limited" in skipped[0]["reason"]
-
-
-def test_foreign_server_alone_skips_the_cycle(dbl, monkeypatch):
-    monkeypatch.setattr(logger, "run_ping", lambda host, count=10: (20.0, 0.0))
-    monkeypatch.setattr(live_sampler, "get_live_source", lambda: _ForeignSource())
-    result = logger.run_cycle(db_path=dbl)
-    assert result["status"] == "skipped"
-    assert db.get_measurements(db_path=dbl) == []
-    assert db.get_outages(db_path=dbl) == []
-    assert len(db.get_skipped_runs(db_path=dbl)) == 1
+    assert "Cloudflare fallback failed" in skipped[0]["reason"]
 
 
 def test_rate_limit_backoff_grows_exponentially(monkeypatch):
