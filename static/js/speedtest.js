@@ -280,6 +280,18 @@ export class SpeedTestGauge {
       this.complete(job);
     } else if (job.phase === 'failed') {
       this.#fail(job, true);
+    } else if (job.phase === 'skipped') {
+      this.#stopPolling();
+      this.#setState('error');
+      this._view.setPhase('SKIPPED');
+      this._view.setStatus(job.error || 'Test skipped — nothing was measured.');
+      showToast('info', job.error || 'Test skipped — nothing was measured.');
+    } else if (job.phase === 'internal_error') {
+      this.#stopPolling();
+      this.#setState('error');
+      this._view.setPhase('ERROR');
+      this._view.setStatus(job.error || 'NetPulse hit an internal error.');
+      showToast('error', job.error || 'NetPulse hit an internal error.');
     } else if (job.phase === 'error') {
       this.#fail(job, false);
     } else {

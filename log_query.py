@@ -87,6 +87,7 @@ def parse_filters(args):
         "sort": sort if sort in SORTS else "newest",
         "min_speed": _num("min_speed"),
         "max_speed": _num("max_speed"),
+        "include_flagged": args.get("include_flagged") == "1",
     }
 
 
@@ -114,6 +115,7 @@ def _within(ts, since, until):
 
 
 def _row_to_entry(row, kind):
+    server = row.get("server")
     return {
         "kind": kind,
         "id": row.get("id"),
@@ -131,9 +133,15 @@ def _row_to_entry(row, kind):
         "server_jitter_ms": row.get("server_jitter_ms"),
         "server_target": row.get("server_target"),
         "engine": row.get("engine"),
-        "server": row.get("server"),
+        "server": server,
         "client": row.get("client"),
         "reason": row.get("reason"),
+        "flagged": bool(row.get("flagged")),
+        "flag_reason": row.get("flag_reason"),
+        "fallback_reason": row.get("fallback_reason"),
+        # Where the measurement actually happened, e.g.
+        # "Measured to Melbicom (Lagos, Nigeria)".
+        "measured_to": server,
     }
 
 
@@ -153,9 +161,12 @@ def query_log(filters, db_path=db.DEFAULT_DB_PATH, limit=500):
         kind = TYPE_FAILED_TEST if row.get("type") == "failed_test" else TYPE_OUTAGE
         entries.append(_row_to_entry(row, kind))
 
-    # Medians come from the full measurement set per engine (stable baseline).
+    # Medians come from the full measurement set per engine (stable baseline),
+    # excluding flagged rows so they match the averages elsewhere.
     medians = {}
     for row in measurements:
+        if row.get("flagged"):
+            continue
         eng = row.get("engine")
         if eng is None:
             continue
@@ -165,6 +176,8 @@ def query_log(filters, db_path=db.DEFAULT_DB_PATH, limit=500):
     out = []
     for entry in entries:
         if filters["type"] != "all" and entry["kind"] != filters["type"]:
+            continue
+        if not filters["include_flagged"] and entry.get("flagged"):
             continue
         if not _engine_matches(entry.get("engine"), filters["engine"]):
             continue
@@ -194,6 +207,7 @@ def to_csv(entries):
         "idle_latency_server_ms", "loaded_latency_server_ms",
         "jitter_server_ms", "latency_target",
         "engine", "server", "client", "reason",
+        "flagged", "flag_reason", "fallback_reason",
     ])
     for e in entries:
         writer.writerow([
@@ -205,5 +219,7 @@ def to_csv(entries):
             e.get("server_jitter_ms"), e.get("server_target"),
             e.get("engine"), e.get("server"), mask_ip(e.get("client")),
             e.get("reason"),
+            1 if e.get("flagged") else 0, e.get("flag_reason"),
+            e.get("fallback_reason"),
         ])
     return buf.getvalue()

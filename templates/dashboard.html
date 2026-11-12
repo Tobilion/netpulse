@@ -28,6 +28,13 @@
 
   <div id="scrollProgress" class="scroll-progress-bar" aria-hidden="true"></div>
 
+  <!-- Internal-error banner (shown when the tool itself is failing) -->
+  <div id="errorBanner" class="error-banner" hidden role="alert">
+    <strong id="errorBannerTitle">NetPulse hit internal errors</strong>
+    <span id="errorBannerText"></span>
+    <button type="button" id="errorBannerClose" aria-label="Dismiss">×</button>
+  </div>
+
   <div class="glow-orb orb-1" aria-hidden="true"></div>
   <div class="glow-orb orb-2" aria-hidden="true"></div>
   <div class="glow-orb orb-3" aria-hidden="true"></div>
@@ -103,6 +110,10 @@
             <option value="ookla">Ookla</option>
             <option value="python">speedtest-cli</option>
           </select>
+          <label class="inline-check">
+            <input type="checkbox" id="includeFlagged" />
+            Include flagged rows
+          </label>
           <span id="engineMeta" style="font-size:0.78rem"></span>
         </label>
         <div class="stats-grid" id="statsGrid" aria-live="polite"></div>

@@ -366,6 +366,27 @@ def count_recent_internal_errors(since_minutes=60, db_path=DEFAULT_DB_PATH):
     return row[0]
 
 
+def count_consecutive_internal_errors(db_path=DEFAULT_DB_PATH):
+    """Internal errors logged since the last successful measurement.
+
+    This is what drives the dashboard banner: a burst of programming
+    errors means the tool is broken, not that the network is.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        last_ok = conn.execute(
+            "SELECT MAX(timestamp) FROM measurements"
+        ).fetchone()[0]
+        if last_ok:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM logger_errors WHERE timestamp > ?",
+                (last_ok,),
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) FROM logger_errors").fetchone()
+    return row[0]
+
+
 def insert_skipped_run(reason, timestamp=None, db_path=DEFAULT_DB_PATH):
     """Record a deliberately skipped cycle (not a measurement/outage)."""
     init_db(db_path)

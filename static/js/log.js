@@ -22,7 +22,7 @@ export class LogView {
     this._medians = {};
     this._filters = {
       range: '7d', type: 'all', engine: 'all', sort: 'newest',
-      min_speed: '', max_speed: '', from: '', to: '',
+      min_speed: '', max_speed: '', from: '', to: '', include_flagged: false,
     };
     this._onNewEntries = null;
   }
@@ -114,6 +114,7 @@ export class LogView {
     if (f.max_speed !== '') params.set('max_speed', f.max_speed);
     if (f.range === 'custom' && f.from) params.set('from', f.from);
     if (f.range === 'custom' && f.to) params.set('to', f.to);
+    if (f.include_flagged) params.set('include_flagged', '1');
     return params.toString();
   }
 
@@ -152,8 +153,9 @@ export class LogView {
         ? '–' : formatSpeedText(e.download_mbps);
       const latency = e.ping_cloudflare_ms === null || e.ping_cloudflare_ms === undefined
         ? '–' : formatLatency(e.ping_cloudflare_ms);
-      return `<button type="button" class="log-row log-${e.kind}" data-log-id="${e.id}">
-        <span class="log-type">${TYPE_LABEL[e.kind] || e.kind}</span>
+      return `<button type="button" class="log-row log-${e.kind}${e.flagged ? ' log-flagged' : ''}"
+        data-log-id="${e.id}">
+        <span class="log-type">${TYPE_LABEL[e.kind] || e.kind}${e.flagged ? ' · FLAGGED' : ''}</span>
         <span class="log-time">${e.timestamp}</span>
         <span class="log-speed">${speed}</span>
         <span class="log-latency">${latency}</span>
@@ -193,6 +195,7 @@ export class LogView {
       ${field('Download', entry.download_mbps == null ? '–' : formatSpeedText(entry.download_mbps))}
       ${field('Download vs same-engine median', comparison(entry.download_mbps))}
       ${field('Upload', entry.upload_mbps == null ? '–' : formatSpeedText(entry.upload_mbps))}
+      ${field('Measured to', entry.measured_to || '–')}
       ${field('Idle latency — 1.1.1.1', entry.ping_cloudflare_ms == null ? '–' : formatLatency(entry.ping_cloudflare_ms))}
       ${field('Loaded latency — 1.1.1.1', entry.loaded_ms == null ? '–' : formatLatency(entry.loaded_ms))}
       ${field('Jitter — 1.1.1.1', entry.jitter_ms == null ? '–' : formatLatency(entry.jitter_ms))}
@@ -204,6 +207,8 @@ export class LogView {
       ${field('Engine', entry.engine || '–')}
       ${field('Server', entry.server || '–')}
       ${field('Client', maskIp(entry.client))}
+      ${entry.flagged ? field('Flagged', entry.flag_reason || 'flagged') : ''}
+      ${entry.fallback_reason ? field('Fallback reason', entry.fallback_reason) : ''}
       ${entry.reason ? field('Reason', entry.reason) : ''}
       ${field('Record ID', `#${entry.id}`)}
     `);

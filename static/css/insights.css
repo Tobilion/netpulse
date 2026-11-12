@@ -346,6 +346,52 @@
   white-space: nowrap;
 }
 
+/* ── Internal error banner ───────────────────────────────────────────── */
+.error-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: rgba(248, 113, 113, 0.12);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--text);
+  padding: 10px 20px;
+  font-size: 0.84rem;
+  position: sticky;
+  top: 0;
+  z-index: 300;
+}
+
+.error-banner[hidden] { display: none; }
+
+.error-banner strong { color: var(--warn); }
+
+.error-banner button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.log-flagged {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.log-flagged .log-type { color: #fbbf24; }
+
 /* ── Settings ─────────────────────────────────────────────────────────── */
 .settings-row {
   margin: 18px 0;

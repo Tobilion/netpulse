@@ -166,6 +166,36 @@ def test_worse_than_usual_ignores_none_and_empty():
     assert is_worse is False
 
 
+def test_band_score_discriminates_across_the_range():
+    """Values above the 'good' ceiling must still score between 0 and 100."""
+    assert insights._band_score(10, insights.LATENCY_BANDS) == 100.0
+    mid = insights._band_score(115, insights.LATENCY_BANDS)
+    assert 0 < mid < 100, f"115 ms should score in between, got {mid}"
+    assert insights._band_score(500, insights.LATENCY_BANDS) == 0.0
+    assert insights._band_score(None, insights.LATENCY_BANDS) is None
+
+
+def test_band_score_is_monotonic():
+    values = [insights._band_score(v, insights.LATENCY_BANDS)
+              for v in (10, 40, 80, 120, 160, 200, 400)]
+    assert values == sorted(values, reverse=True)
+
+
+def test_health_uses_discriminating_latency():
+    """A 120 ms link must not score the same as a 400 ms link."""
+    good = insights.compute_health(
+        uptime_pct=100.0, failed_test_count=0, cycle_count=10,
+        download_mbps=10.0, target_mbps=10.0,
+        idle_latency_ms=120.0, loss_pct=0.0, jitter_ms=5.0,
+    )
+    bad = insights.compute_health(
+        uptime_pct=100.0, failed_test_count=0, cycle_count=10,
+        download_mbps=10.0, target_mbps=10.0,
+        idle_latency_ms=400.0, loss_pct=0.0, jitter_ms=5.0,
+    )
+    assert good["score"] > bad["score"]
+
+
 def test_median_helper():
     assert insights.median([3, 1, 2]) == 2
     assert insights.median([1, 2, 3, 4]) == 2.5

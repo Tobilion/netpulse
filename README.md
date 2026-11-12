@@ -53,6 +53,44 @@ venv\Scripts\python.exe main.py export
 
 A typical setup: use `watch` or Windows Task Scheduler to collect in the background, then open `serve` whenever you want to review your ISP.
 
+## Running the collector from a stable worktree
+
+The background collector imports the code once, at start. If you edit the
+project while it runs, the running process keeps the old code — but a
+crash or a restart would then pick up your half-finished edits. Running
+the collector from a dedicated git worktree keeps that impossible:
+
+```powershell
+cd C:\Users\tobil\Desktop\Projects\netpulse
+git worktree add C:\Users\tobil\Desktop\Projects\netpulse-runner feature/netpulse-upgrade
+cd C:\Users\tobil\Desktop\Projects\netpulse-runner
+venv\Scripts\python.exe main.py watch --interval 30
+```
+
+The worktree has its own copy of the code and its own `netpulse.db`
+(untracked, like the main one). Edit freely in the main folder; the
+collector keeps running the code it was started with.
+
+> **Interval:** `watch` refuses anything under 10 minutes
+> (`NETPULSE` engines rate-limit at high frequency). **30 minutes is the
+> recommended value** — it is the default. Use `--force` only if you
+> really mean it.
+
+## Which engine runs
+
+Ookla's CLI is used first; the Python `speedtest-cli` is only a fallback
+when Ookla is missing or rate-limited. Two rules keep the data honest:
+
+- **Never measure to a server in another country.** `speedtest-cli`
+  picks the nearest server to the IP's geolocated position, which from
+  this network is usually Germany or the Netherlands. Those runs are
+  refused, and the cycle is recorded as *skipped* (not a measurement,
+  not an outage).
+- **Rate limits back off.** After an Ookla usage limit the engine waits
+  15 minutes, then 30, then 60 (capped) before trying again.
+
+Set `NETPULSE_HOME_COUNTRY` if your connection is not in Nigeria.
+
 ## Scheduling with Windows Task Scheduler
 
 To log measurements automatically every 30 minutes without keeping a terminal open:

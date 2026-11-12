@@ -1,6 +1,7 @@
 """Flask dashboard server for NetPulse."""
 
 import json
+import os
 import threading
 import time
 from datetime import datetime, timedelta
@@ -48,10 +49,12 @@ def index():
 @app.route("/api/data")
 def api_data():
     since = _since_from_request()
-    measurements = db.get_measurements(since=since)
+    include_flagged = request.args.get("include_flagged") == "1"
+    measurements = db.get_measurements(since=since, include_flagged=include_flagged)
     outages = db.get_outages(since=since)
     failed_tests = db.get_failed_tests(since=since)
-    stats = db.get_stats(since=since, engine=request.args.get("engine"))
+    stats = db.get_stats(since=since, engine=request.args.get("engine"),
+                         include_flagged=include_flagged)
 
     # Hour-of-day average download speed
     hourly = {h: [] for h in range(24)}
@@ -109,11 +112,31 @@ def api_log_csv():
     )
 
 
+# ── Internal errors (programming bugs) ───────────────────────────────────
+# Threshold for the dashboard banner: this many internal errors since the
+# last successful measurement means the tool itself is broken.
+INTERNAL_ERROR_BANNER_THRESHOLD = int(
+    os.environ.get("NETPULSE_ERROR_BANNER_THRESHOLD", "3")
+)
+
+
+@app.route("/api/errors")
+def api_errors():
+    """Recent programming errors and whether to show the banner."""
+    consecutive = db.count_consecutive_internal_errors()
+    return jsonify({
+        "consecutive": consecutive,
+        "threshold": INTERNAL_ERROR_BANNER_THRESHOLD,
+        "show_banner": consecutive >= INTERNAL_ERROR_BANNER_THRESHOLD,
+        "errors": db.get_logger_errors(limit=10),
+        "skipped_runs": db.get_skipped_runs(limit=10),
+    })
+
+
 # ── Settings (advertised plan speed) ──────────────────────────────────────
 @app.route("/api/settings")
 def api_settings_get():
     return jsonify({"plan_speed_mbps": db.get_setting("plan_speed_mbps")})
-
 
 @app.route("/api/settings", methods=["POST"])
 def api_settings_post():
@@ -138,11 +161,12 @@ def api_insights():
     range_key = request.args.get("range", "7d")
     delta = RANGE_MAP.get(range_key, RANGE_MAP["7d"])
     since = datetime.now() - delta if delta else None
+    include_flagged = request.args.get("include_flagged") == "1"
 
-    measurements = db.get_measurements(since=since)
+    measurements = db.get_measurements(since=since, include_flagged=include_flagged)
     outages = db.get_outages(since=since)
     failed_tests = db.get_failed_tests(since=since)
-    true_outages = [o for o in outages if o.get("type") != "failed_test"]
+    true_outages = [o for o in outages if o.get("type") == "outage"]
 
     plan_raw = db.get_setting("plan_speed_mbps")
     plan = float(plan_raw) if plan_raw else None
@@ -187,6 +211,8 @@ def api_insights():
         "health": health,
         "compatibility": insights.compute_compatibility(latest),
         "heatmap": heatmap,
+        "include_flagged": include_flagged,
+        "flagged_count": len(db.flagged_measurements()),
         "worse_than_usual": {
             "is_worse": bool(worse),
             "median_mbps": median_7d,
@@ -340,6 +366,20 @@ def _run_live_job():
             job["client"] = result.get("client")
             job["server"] = result.get("server")
             job["engine"] = result.get("engine")
+            return
+
+        if result["status"] == "skipped":
+            # Deliberately skipped (e.g. rate-limited): not a measurement,
+            # not an outage.
+            job["phase"] = "skipped"
+            job["error"] = result.get("reason")
+            job["running"] = False
+            return
+
+        if result["status"] == "internal_error":
+            job["phase"] = "internal_error"
+            job["error"] = result.get("reason")
+            job["running"] = False
             return
 
         if result["status"] == "outage":

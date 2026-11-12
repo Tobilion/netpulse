@@ -61,16 +61,38 @@ def cmd_once(_args):
         print(f"OUTAGE recorded: {result['reason']}")
 
 
+MIN_WATCH_INTERVAL = 10
+RECOMMENDED_WATCH_INTERVAL = 30
+
+
 def cmd_watch(args):
     ensure_speedtest_importable()
     import logger
+
+    if args.interval < MIN_WATCH_INTERVAL and not args.force:
+        print(
+            f"Refusing to measure every {args.interval} minute(s).\n"
+            f"Each cycle consumes a speed test; intervals under {MIN_WATCH_INTERVAL} "
+            f"minutes get the engine rate-limited and the data becomes noise.\n"
+            f"Recommended: every {RECOMMENDED_WATCH_INTERVAL} minutes.\n"
+            f"Use --force to override."
+        )
+        sys.exit(2)
 
     interval_s = args.interval * 60
     print(f"Watching: one cycle every {args.interval} minute(s). Ctrl+C to stop.")
     while True:
         try:
             result = logger.run_cycle()
-            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {result['status']}")
+            status = result["status"]
+            note = ""
+            if status == "skipped":
+                note = f" ({result.get('reason')})"
+            elif status == "failed":
+                note = f" ({result.get('reason')})"
+            elif status == "internal_error":
+                note = f" (internal error, logged separately: {result.get('reason')})"
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {status}{note}")
         except Exception as exc:
             print(f"Cycle error (continuing): {exc}")
         time.sleep(interval_s)
@@ -173,7 +195,12 @@ def main():
     sub.add_parser("once", help="Run one measurement cycle")
 
     watch = sub.add_parser("watch", help="Run a cycle every N minutes forever")
-    watch.add_argument("--interval", type=int, default=30, help="Minutes between cycles (default 30)")
+    watch.add_argument("--interval", type=int, default=RECOMMENDED_WATCH_INTERVAL,
+                        help=f"Minutes between cycles (minimum {MIN_WATCH_INTERVAL}, "
+                             f"recommended {RECOMMENDED_WATCH_INTERVAL}; default "
+                             f"{RECOMMENDED_WATCH_INTERVAL})")
+    watch.add_argument("--force", action="store_true",
+                        help=f"Allow an interval under {MIN_WATCH_INTERVAL} minutes")
 
     sub.add_parser("export", help="Export all data to CSV")
     sub.add_parser("demo", help="Seed the DB with 14 days of fake data")

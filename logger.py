@@ -76,9 +76,7 @@ def run_speed_test():
 
 def _is_internal_error(exc):
     """True when an exception is a programming bug, not a network event."""
-    return isinstance(exc, db.INTERNAL_ERROR_KINDS) or (
-        type(exc).__name__ in db.INTERNAL_ERROR_KINDS
-    )
+    return type(exc).__name__ in db.INTERNAL_ERROR_KINDS
 
 
 def _log_internal_error(exc, context, db_path=db.DEFAULT_DB_PATH):
@@ -107,22 +105,29 @@ def _run_sampler_result(source, on_progress=None, should_cancel=None):
         return src.run(on_progress=on_progress, should_cancel=should_cancel)
 
     try:
-        return _run(source), None
+        result = _run(source)
+        if isinstance(source, live_sampler.OoklaLiveSource):
+            live_sampler.clear_rate_limit()
+        return result, None
     except live_sampler.RateLimitedError as exc:
-        reason = f"primary engine rate-limited: {exc}"
+        delay = live_sampler.note_rate_limit()
+        reason = (f"primary engine rate-limited: {exc} "
+                  f"(backing off {delay // 60} min)")
         if isinstance(source, live_sampler.SpeedtestCLILiveSource):
             raise live_sampler.SkippedRun(reason) from exc
         try:
             fallback = live_sampler.SpeedtestCLILiveSource()
-            return _run(fallback), reason
+            result = _run(fallback)
+            return result, reason
         except live_sampler.ForeignServerError as foreign:
             raise live_sampler.SkippedRun(
                 f"{reason}; fallback has no server in {live_sampler.home_country().title()}"
             ) from foreign
     except live_sampler.ForeignServerError as exc:
-        if isinstance(source, live_sampler.SpeedtestCLILiveSource):
-            raise live_sampler.SkippedRun(str(exc)) from exc
-        raise
+        # We never measure to a server outside the home country, whichever
+        # engine asked for it: skip the cycle instead of storing a row that
+        # describes another country's path.
+        raise live_sampler.SkippedRun(str(exc)) from exc
     except live_sampler.PreStartError as exc:
         reason = f"primary engine unavailable: {exc}"
         if isinstance(source, live_sampler.SpeedtestCLILiveSource):
@@ -363,9 +368,16 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
             # Fallback only when the primary failed before any progress:
             # retry once with the Python source, never mid-test.
             try:
-                return primary.run(on_progress=merge_speed, should_cancel=should_cancel), None
+                result = primary.run(on_progress=merge_speed, should_cancel=should_cancel)
+                if isinstance(primary, live_sampler.OoklaLiveSource):
+                    live_sampler.clear_rate_limit()
+                return result, None
             except live_sampler.RateLimitedError as exc:
-                fallback_reason[0] = f"primary engine rate-limited: {exc}"
+                delay = live_sampler.note_rate_limit()
+                fallback_reason[0] = (
+                    f"primary engine rate-limited: {exc} "
+                    f"(backing off {delay // 60} min)"
+                )
                 if isinstance(primary, live_sampler.SpeedtestCLILiveSource):
                     raise live_sampler.SkippedRun(fallback_reason[0]) from exc
                 try:
@@ -379,9 +391,8 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
                         f"{live_sampler.home_country().title()}"
                     ) from foreign
             except live_sampler.ForeignServerError as exc:
-                if isinstance(primary, live_sampler.SpeedtestCLILiveSource):
-                    raise live_sampler.SkippedRun(str(exc)) from exc
-                raise
+                # Never measure to a server outside the home country.
+                raise live_sampler.SkippedRun(str(exc)) from exc
             except live_sampler.PreStartError:
                 if isinstance(primary, live_sampler.SpeedtestCLILiveSource):
                     raise
@@ -473,6 +484,16 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
         progress({"loaded_ms": loaded})
 
     except Exception as exc:  # speedtest-cli raises various exception types
+        if _is_internal_error(exc):
+            # A programming bug is not a network event: never an outage.
+            _log_internal_error(exc, "run_live_cycle", db_path=db_path)
+            return {
+                "status": "internal_error",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "timestamp": timestamp,
+                "client": client_label,
+                "server": server_label,
+            }
         reason = f"Speed test failed: {type(exc).__name__}: {exc}"
         db.insert_outage(timestamp, reason, db_path=db_path)
         return {
@@ -502,6 +523,7 @@ def run_live_cycle(on_phase=None, should_cancel=None, on_progress=None,
         "server_loaded_ms": server_latency.get("loaded_ms"),
         "server_jitter_ms": result.get("jitter_ms"),
         "server_target": server_label,
+        "fallback_reason": fallback_reason[0],
     }
     db.insert_measurement(data, db_path=db_path)
     return {

@@ -44,12 +44,14 @@ import {
 /* ── STATE ──────────────────────────────────────────── */
 let currentRange = '7d';
 let currentEngine = 'all';
+let includeFlagged = false;
 let heroScrambled = false;
 let lastData = null;
 let lastInsights = null;
 
 const PILL_POLL_MS = 60_000;
 const INCIDENT_POLL_MS = 20_000;
+const ERROR_POLL_MS = 60_000;
 
 const logView = new LogView();
 const settingsView = new SettingsView();
@@ -137,7 +139,9 @@ async function loadData(range) {
   showStatSkeletons(document.getElementById('statsGrid'), 5);
   try {
     const res = await fetch(
-      `/api/data?range=${encodeURIComponent(range)}&engine=${encodeURIComponent(currentEngine)}`,
+      `/api/data?range=${encodeURIComponent(range)}`
+      + `&engine=${encodeURIComponent(currentEngine)}`
+      + `&include_flagged=${includeFlagged ? '1' : '0'}`,
       { cache: 'no-store' }
     );
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
@@ -150,7 +154,11 @@ async function loadData(range) {
 
 async function loadInsights() {
   try {
-    const res = await fetch(`/api/insights?range=${encodeURIComponent(currentRange)}`, { cache: 'no-store' });
+    const res = await fetch(
+      `/api/insights?range=${encodeURIComponent(currentRange)}`
+      + `&include_flagged=${includeFlagged ? '1' : '0'}`,
+      { cache: 'no-store' }
+    );
     if (!res.ok) return;
     lastInsights = await res.json();
     renderHealth(document.getElementById('healthCard'), lastInsights.health);
@@ -160,6 +168,30 @@ async function loadInsights() {
     renderHeatmap(document.getElementById('heatmapMount'), lastInsights.heatmap);
   } catch (err) {
     console.error('[NetPulse] insights load error:', err);
+  }
+}
+
+/* ── Internal error banner ──────────────────────────── */
+async function pollErrors() {
+  try {
+    const res = await fetch('/api/errors', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const banner = document.getElementById('errorBanner');
+    if (!banner) return;
+    if (data.show_banner) {
+      document.getElementById('errorBannerTitle').textContent =
+        `NetPulse hit ${data.consecutive} internal errors`;
+      const last = (data.errors || [])[0];
+      document.getElementById('errorBannerText').textContent = last
+        ? `${last.kind}: ${last.message} (${last.timestamp}) — measurements are paused until this is fixed.`
+        : 'Measurements are paused until this is fixed.';
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
+  } catch {
+    // Transient error — the next tick retries.
   }
 }
 
@@ -258,6 +290,22 @@ function init() {
       loadData(currentRange);
     });
   }
+  const flaggedToggle = document.getElementById('includeFlagged');
+  if (flaggedToggle) {
+    flaggedToggle.addEventListener('change', () => {
+      includeFlagged = flaggedToggle.checked;
+      loadData(currentRange);
+      loadInsights();
+      logView.setFilters({ include_flagged: includeFlagged });
+    });
+  }
+  const bannerClose = document.getElementById('errorBannerClose');
+  if (bannerClose) {
+    bannerClose.addEventListener('click', () => {
+      const banner = document.getElementById('errorBanner');
+      if (banner) banner.hidden = true;
+    });
+  }
   logView.init();
   settingsView.init();
   initTabs((tab) => {
@@ -283,8 +331,10 @@ function init() {
   });
   loadData(currentRange);
   loadInsights();
+  pollErrors();
   setInterval(refreshPill, PILL_POLL_MS);
   setInterval(pollIncidents, INCIDENT_POLL_MS);
+  setInterval(pollErrors, ERROR_POLL_MS);
 }
 
 document.addEventListener('DOMContentLoaded', init);

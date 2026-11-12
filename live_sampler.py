@@ -156,12 +156,54 @@ class SpeedtestCLILiveSource(LiveDataSource):
         }
 
 
+# ── Rate-limit backoff ───────────────────────────────────────────────────
+# Ookla refuses to run once its usage limit is hit. Instead of retrying
+# every cycle (which keeps the limit tripped), back off exponentially:
+# 15 min, 30 min, 60 min ... capped, and reset after a successful run.
+_RATE_LIMIT = {"count": 0, "until": 0.0}
+
+
+def _backoff_base():
+    try:
+        return int(os.environ.get("NETPULSE_RATE_LIMIT_BACKOFF_SECONDS", "900"))
+    except ValueError:
+        return 900
+
+
+def _backoff_max():
+    try:
+        return int(os.environ.get("NETPULSE_RATE_LIMIT_BACKOFF_MAX_SECONDS", "3600"))
+    except ValueError:
+        return 3600
+
+
+def rate_limit_state():
+    """Current backoff state: (consecutive_hits, seconds_remaining)."""
+    remaining = max(0.0, _RATE_LIMIT["until"] - time.monotonic())
+    return _RATE_LIMIT["count"], remaining
+
+
+def note_rate_limit():
+    """Record a rate limit and extend the backoff window. Returns seconds."""
+    _RATE_LIMIT["count"] += 1
+    delay = min(_backoff_base() * (2 ** (_RATE_LIMIT["count"] - 1)), _backoff_max())
+    _RATE_LIMIT["until"] = time.monotonic() + delay
+    return delay
+
+
+def clear_rate_limit():
+    """Reset the backoff after a successful Ookla run."""
+    _RATE_LIMIT["count"] = 0
+    _RATE_LIMIT["until"] = 0.0
+
+
 def get_live_source(name=None):
     """Return the live source.
 
     Explicit ``NETPULSE_LIVE_SOURCE=ookla`` requires Ookla. Explicit
     ``speedtestcli`` requires the Python source. Otherwise auto:
-    Ookla when its binary is found, else the Python source.
+    Ookla when its binary is found and it is not in rate-limit backoff,
+    else the Python source.
     """
     want = (name or os.environ.get("NETPULSE_LIVE_SOURCE", "")).lower()
     if want == "ookla":
@@ -172,7 +214,11 @@ def get_live_source(name=None):
     if want in ("speedtestcli", "speedtest-cli", "python"):
         return SpeedtestCLILiveSource()
     if want in ("auto", ""):
+        hits, remaining = rate_limit_state()
         if find_ookla_binary():
+            if hits and remaining > 0:
+                # Still backing off: use the fallback engine instead.
+                return SpeedtestCLILiveSource()
             return OoklaLiveSource()
         return SpeedtestCLILiveSource()
     raise ValueError(f"Unknown live source: {want!r}")

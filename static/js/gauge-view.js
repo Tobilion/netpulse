@@ -220,9 +220,12 @@ export class GaugeView {
       { label: 'Download Speed', value: dl.text },
       { label: 'Upload Speed', value: ul.text },
       { label: 'Engine', value: data.engine || '–' },
+      { label: 'Measured to', value: data.server || '–', full: true },
       { label: 'Client', value: maskIp(data.client), full: true },
-      { label: 'Server', value: data.server || '–', full: true },
     ];
+    if (data.fallback_reason) {
+      rows.push({ label: 'Fallback reason', value: data.fallback_reason, full: true });
+    }
     this._resultsEl.innerHTML = rows.map((r) => `
       <div class="result-item${r.full ? ' result-item-full' : ''}">
         <div class="result-label">${r.label.toUpperCase()}</div>

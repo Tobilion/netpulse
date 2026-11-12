@@ -31,9 +31,14 @@ HEALTH_BANDS = [
 # fraction of an outage. Failed tests are NOT outages, so this stays low.
 FAILED_TEST_WEIGHT = 0.25
 
-# Idle-latency quality scale (ms). These are NetPulse's own quality bands
-# (not vendor minimum requirements): interactive use feels instant under
-# ~30 ms, acceptable to ~50 ms, noticeably laggy to ~100 ms, painful beyond.
+# Idle-latency quality scale (ms). NetPulse's own operational bands — no
+# vendor publishes a latency requirement, so these are our own scale, chosen
+# so the score lines up with how interactive use actually feels:
+#   <=30 ms  instant (a local path; nothing to feel)
+#   <=50 ms  responsive (competitive play, voice chat)
+#   <=100 ms noticeable on every click
+#   <=200 ms painful
+# The call and gaming thresholds below reuse this scale.
 LATENCY_BANDS = {"excellent": 30.0, "good": 50.0, "fair": 100.0, "poor": 200.0}
 
 # Packet loss quality scale (%): any loss is notable, >1% visibly breaks
@@ -45,59 +50,72 @@ JITTER_BANDS = {"excellent": 5.0, "good": 15.0, "fair": 30.0, "poor": 60.0}
 
 # Compatibility thresholds per activity.
 #   down_good / down_fair : minimum download Mbps for good / fair
+#   up_good / up_fair      : minimum upload Mbps for good / fair
 #   ping_good / ping_fair  : idle latency ms ceiling for good / fair
 #   jitter_good / jitter_fair, loss_good / loss_fair
+#   use                    : which metrics actually matter for the activity
 #
 # Sources:
-#   Streaming — Netflix recommended internet speeds, fetched 2026-11-10:
-#     https://help.netflix.com/en/node/306 (720p 3 Mbps, 1080p 5 Mbps, 4K 15 Mbps)
-#   Browsing — floor set from the same published 720p baseline (a page plus
-#     one 720p stream). Not a vendor "minimum" claim.
-#   Video calls — Google Meet / Zoom published HD-video bandwidth figures
-#     (~3.8 Mbps for HD video). NOT re-verified on 2026-11-10 (both vendor
-#     pages were unreachable from this machine); check before trusting:
-#     https://support.google.com/meet/answer/1622174
-#     https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0063894
-#   Gaming — driven by latency/jitter/loss (what actually breaks gameplay)
-#     with a small bandwidth floor. The latency bands are NetPulse's own
-#     quality scale (see LATENCY_BANDS), not a publisher's requirement.
+#   Video calls - Google Meet, "Quality of service recommendations"
+#     https://support.google.com/a/answer/1279090
+#       video: ~1 Mbps up / 1.3 Mbps down; audio only: 12/18 kbps
+#     Zoom (SECONDARY SOURCE - verify against Zoom's current official page,
+#     https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0063894 ):
+#       1:1 600 kbps; 720p 1.2 Mbps; 1080p 1.8 Mbps; group 800 kbps-1.0 Mbps
+#     Zoom's 1080p figure is the "good" tier and Meet's 1.3 Mbps down /
+#     1 Mbps up is the "fair" floor; the audio-only figures (18 kbps down,
+#     12 kbps up) are far below every tier, so an audio call still works
+#     on a slow link.
+#   Streaming - Netflix recommended internet speeds,
+#     https://help.netflix.com/en/node/306 (720p 3 Mbps, 1080p 5 Mbps,
+#     4K 15 Mbps) - fetched and verified 2026-11-10.
+#   Browsing - floor from the same published 720p baseline (a page plus one
+#     720p stream). Not a vendor "minimum" claim.
+#   Gaming - driven by latency/jitter/loss (what actually breaks gameplay),
+#     using NetPulse's own latency bands above; no publisher states a
+#     latency requirement, so this row is our own judgement.
 COMPATIBILITY = {
     "browsing": {
         "label": "Browsing",
         "use": ["download", "ping"],
         "down_good": 3.0, "down_fair": 1.0,
+        "up_good": 1.0, "up_fair": 0.5,
         "ping_good": 100.0, "ping_fair": 250.0,
         "jitter_good": 30.0, "jitter_fair": 60.0,
         "loss_good": 0.5, "loss_fair": 2.0,
-        "source": "https://help.netflix.com/en/node/306 (720p baseline)",
+        "source": "Netflix 720p baseline (help.netflix.com/en/node/306)",
     },
     "gaming": {
         "label": "Gaming",
         "use": ["download", "ping", "jitter", "loss"],
         "down_good": 5.0, "down_fair": 1.0,
+        "up_good": 1.0, "up_fair": 0.5,
         "ping_good": 50.0, "ping_fair": 100.0,
         "jitter_good": 15.0, "jitter_fair": 30.0,
         "loss_good": 0.5, "loss_fair": 2.0,
-        "source": "NetPulse latency/jitter/loss quality bands",
+        "source": "NetPulse latency/jitter/loss bands (no vendor requirement)",
     },
     "streaming": {
         "label": "Streaming",
         # Bandwidth is what streaming needs; latency barely affects video.
         "use": ["download"],
         "down_good": 5.0, "down_fair": 3.0,
+        "up_good": 1.0, "up_fair": 0.5,
         "ping_good": 100.0, "ping_fair": 250.0,
         "jitter_good": 30.0, "jitter_fair": 60.0,
         "loss_good": 0.5, "loss_fair": 2.0,
-        "source": "https://help.netflix.com/en/node/306 (1080p 5 / 720p 3 Mbps)",
+        "source": "Netflix 1080p 5 / 720p 3 Mbps (help.netflix.com/en/node/306)",
     },
     "video_calls": {
         "label": "Video calls",
-        "use": ["download", "ping", "jitter", "loss"],
-        "down_good": 3.8, "down_fair": 1.5,
+        "use": ["download", "upload", "ping", "jitter", "loss"],
+        "down_good": 1.8, "down_fair": 1.3,
+        "up_good": 1.0, "up_fair": 0.6,
         "ping_good": 100.0, "ping_fair": 250.0,
         "jitter_good": 30.0, "jitter_fair": 60.0,
         "loss_good": 0.5, "loss_fair": 2.0,
-        "source": "Meet/Zoom HD video bandwidth (unverified 2026-11-10)",
+        "source": "Meet 1.3/1 Mbps video (support.google.com/a/answer/1279090); "
+                  "Zoom 1.8/1.2 Mbps [secondary source - verify]",
     },
 }
 
@@ -122,25 +140,24 @@ def _band(value, bands):
 
 
 def _band_score(value, bands):
-    """Map a value to 0-100 using the band ceilings (linear between)."""
+    """Map a value to 0-100 using the band ceilings (lower is better).
+
+    Linear from 100 at the "excellent" ceiling down to 0 at the "poor"
+    ceiling. Values past the poor ceiling score 0 (no credit for being
+    worse than poor), but the whole range in between still discriminates
+    instead of collapsing to zero.
+    """
     if value is None:
         return None
-    order = ["excellent", "good", "fair", "poor"]
     best = bands["excellent"]
     worst = bands["poor"]
     if value <= best:
         return 100.0
     if value >= worst:
         return 0.0
-    for i in range(len(order) - 1):
-        hi_band, lo_band = order[i], order[i + 1]
-        hi, lo = bands[hi_band], bands[lo_band]
-        if value <= hi:
-            span = hi - lo
-            if span <= 0:
-                return 0.0
-            return 100.0 * (hi - value) / span
-    return 0.0
+    if worst <= best:
+        return 0.0
+    return 100.0 * (worst - value) / (worst - best)
 
 
 def median(values):
@@ -259,6 +276,7 @@ def compute_compatibility(latest):
     if not latest:
         return []
     download = latest.get("download_mbps")
+    upload = latest.get("upload_mbps")
     ping = latest.get("ping_cloudflare_ms")
     jitter = latest.get("jitter_ms")
     loss = latest.get("loss_cloudflare_pct")
@@ -272,6 +290,11 @@ def compute_compatibility(latest):
             levels["download"] = level
             if level != "good":
                 reasons.append(f"download {round(download, 1)} Mbps")
+        if "upload" in wanted and upload is not None:
+            level = _level(upload, cfg["up_good"], cfg["up_fair"], higher_is_worse=False)
+            levels["upload"] = level
+            if level != "good":
+                reasons.append(f"upload {round(upload, 2)} Mbps")
         for label, value, good, fair in (
             ("ping", ping, cfg["ping_good"], cfg["ping_fair"]),
             ("jitter", jitter, cfg["jitter_good"], cfg["jitter_fair"]),
@@ -296,7 +319,6 @@ def compute_compatibility(latest):
             "source": cfg["source"],
         })
     return results
-
 
 # ── UPTIME HEATMAP ───────────────────────────────────────────────────────
 def build_heatmap(measurements, outages, days=90, today=None):
