@@ -26,9 +26,15 @@ from ookla_parse import (
 )
 from ookla_source import OoklaLiveSource, find_ookla_binary, kill_process_tree, mask_ip
 from sources_base import (
+    ForeignServerError,
     LiveDataSource,
     PartialTestError,
     PreStartError,
+    RateLimitedError,
+    SkippedRun,
+    home_country,
+    server_country,
+    server_is_local,
     watchdog_seconds,
 )
 
@@ -98,6 +104,15 @@ class SpeedtestCLILiveSource(LiveDataSource):
                 f"{server.get('sponsor') or 'Unknown host'} "
                 f"({server.get('name') or '?'}, {server.get('country') or '?'})"
             )
+            # speedtest-cli picks the nearest server to the IP's geolocated
+            # position, which for this network is usually thousands of km
+            # away. Measuring to another country measures that country's
+            # path, so refuse instead of storing a misleading row.
+            if not server_is_local(server_label):
+                raise ForeignServerError(
+                    f"speedtest-cli can only reach {server_label} "
+                    f"(home country: {home_country().title()})"
+                )
 
             real_opener = st._opener
             st._opener = _CountingOpener(real_opener, counter)
@@ -230,4 +245,6 @@ __all__ = [
     "find_ookla_binary", "kill_process_tree", "OoklaLiveSource",
     "parse_ookla_line", "bandwidth_to_mbps", "ookla_progress_event",
     "labels_from_test_start", "result_to_final",
+    "ForeignServerError", "RateLimitedError", "SkippedRun",
+    "home_country", "server_country", "server_is_local",
 ]

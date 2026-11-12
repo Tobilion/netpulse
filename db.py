@@ -81,6 +81,27 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Programming errors (NameError, TypeError, ...) are NOT network events.
+-- They are recorded here so they never count as outages or failed tests.
+CREATE TABLE IF NOT EXISTS logger_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    kind TEXT,
+    message TEXT,
+    context TEXT,
+    traceback TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_logger_errors_ts ON logger_errors (timestamp);
+
+-- Cycles that were deliberately skipped (e.g. engine rate-limited).
+-- Not a measurement and not an outage.
+CREATE TABLE IF NOT EXISTS skipped_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_skipped_ts ON skipped_runs (timestamp);
 """
 
 
@@ -116,6 +137,11 @@ _MIGRATION_COLUMNS = {
     "server_loaded_ms": "REAL",
     "server_jitter_ms": "REAL",
     "server_target": "TEXT",
+    # Flagged rows are kept but excluded from averages/health by default.
+    "flagged": "INTEGER DEFAULT 0",
+    "flag_reason": "TEXT",
+    # Why the primary engine was not used (e.g. Ookla rate limit).
+    "fallback_reason": "TEXT",
 }
 
 _FAILED_TEST_MIGRATION_COLUMNS = {
@@ -123,6 +149,7 @@ _FAILED_TEST_MIGRATION_COLUMNS = {
     "server_loaded_ms": "REAL",
     "server_jitter_ms": "REAL",
     "server_target": "TEXT",
+    "fallback_reason": "TEXT",
 }
 
 
@@ -265,13 +292,131 @@ def insert_failed_test(data, db_path=DEFAULT_DB_PATH):
 def classify_outage(row):
     """Read-time class for legacy outages (never rewrite rows).
 
-    Returns "failed_test" when the cause looks like a transfer failure
-    with working ping, else "outage".
+    "internal_error"  programming error (NameError, TypeError, ...) - the
+                      network was never really tested, so it is neither an
+                      outage nor a failed test.
+    "failed_test"     a transfer failure while ping worked.
+    "outage"         the network was unreachable.
     """
     reason = (row.get("reason") or "") if isinstance(row, dict) else ""
+    if is_internal_error_reason(reason):
+        return "internal_error"
     if reason.startswith("Speed test failed:"):
         return "failed_test"
     return "outage"
+
+
+# Programming exceptions that mean "the tool broke", not "the network broke".
+INTERNAL_ERROR_KINDS = (
+    "NameError", "TypeError", "ImportError", "ModuleNotFoundError",
+    "AttributeError", "SyntaxError", "IndentationError", "KeyError",
+    "IndexError", "UnboundLocalError", "ZeroDivisionError", "RecursionError",
+    "AssertionError", "NotImplementedError", "StopIteration",
+)
+
+
+def is_internal_error_reason(reason):
+    """True when a stored reason describes a programming error."""
+    if not reason:
+        return False
+    text = str(reason)
+    # Reasons are stored as "Speed test failed: <ExceptionType>: <message>"
+    # or "<ExceptionType>: <message>".
+    for kind in INTERNAL_ERROR_KINDS:
+        if text.startswith(kind + ":") or (": " + kind + ":") in text:
+            return True
+    return False
+
+
+def insert_logger_error(kind, message, context=None, traceback_text=None,
+                        timestamp=None, db_path=DEFAULT_DB_PATH):
+    """Record a programming error. Never an outage, never a failed test."""
+    init_db(db_path)
+    ts = timestamp or datetime.now().replace(microsecond=0)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO logger_errors
+               (timestamp, kind, message, context, traceback)
+               VALUES (?, ?, ?, ?, ?)""",
+            (_iso(ts), kind, message, context, traceback_text),
+        )
+        return cur.lastrowid
+
+
+def get_logger_errors(limit=50, db_path=DEFAULT_DB_PATH):
+    """Recent internal errors, newest first."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM logger_errors ORDER BY timestamp DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_recent_internal_errors(since_minutes=60, db_path=DEFAULT_DB_PATH):
+    """How many internal errors were logged in the recent window."""
+    init_db(db_path)
+    cutoff = (datetime.now() - timedelta(minutes=since_minutes)).replace(microsecond=0)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM logger_errors WHERE timestamp >= ?",
+            (_iso(cutoff),),
+        ).fetchone()
+    return row[0]
+
+
+def insert_skipped_run(reason, timestamp=None, db_path=DEFAULT_DB_PATH):
+    """Record a deliberately skipped cycle (not a measurement/outage)."""
+    init_db(db_path)
+    ts = timestamp or datetime.now().replace(microsecond=0)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO skipped_runs (timestamp, reason) VALUES (?, ?)",
+            (_iso(ts), reason),
+        )
+        return cur.lastrowid
+
+
+def get_skipped_runs(limit=50, db_path=DEFAULT_DB_PATH):
+    """Recently skipped cycles, newest first."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM skipped_runs ORDER BY timestamp DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def flag_measurement(row_id, reason, db_path=DEFAULT_DB_PATH):
+    """Flag a measurement so it is excluded from averages and health."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE measurements SET flagged = 1, flag_reason = ? WHERE id = ?",
+            (reason, row_id),
+        )
+
+
+def unflag_measurement(row_id, db_path=DEFAULT_DB_PATH):
+    """Clear a measurement flag."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE measurements SET flagged = 0, flag_reason = NULL WHERE id = ?",
+            (row_id,),
+        )
+
+
+def flagged_measurements(db_path=DEFAULT_DB_PATH):
+    """All flagged measurements (for the Log's flagged list)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM measurements WHERE flagged = 1 ORDER BY timestamp DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_failed_tests(since=None, db_path=DEFAULT_DB_PATH):
@@ -287,17 +432,25 @@ def get_failed_tests(since=None, db_path=DEFAULT_DB_PATH):
         return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
-def get_measurements(since=None, db_path=DEFAULT_DB_PATH):
+def get_measurements(since=None, db_path=DEFAULT_DB_PATH, include_flagged=False):
     """Return measurement rows (as dicts), newest last.
 
     since: optional datetime/ISO string -- only rows at or after this time.
+    include_flagged: include rows a user flagged as not representative.
+    Flagged rows are excluded by default so averages, the health score and
+    the trends never use them.
     """
     init_db(db_path)
     query = "SELECT * FROM measurements"
     params = []
+    where = []
     if since is not None:
-        query += " WHERE timestamp >= ?"
+        where.append("timestamp >= ?")
         params.append(_iso(since))
+    if not include_flagged:
+        where.append("(flagged IS NULL OR flagged = 0)")
+    if where:
+        query += " WHERE " + " AND ".join(where)
     query += " ORDER BY timestamp ASC"
     with get_connection(db_path) as conn:
         return [dict(row) for row in conn.execute(query, params).fetchall()]
@@ -323,7 +476,8 @@ def get_outages(since=None, db_path=DEFAULT_DB_PATH):
     return rows
 
 
-def get_stats(since=None, db_path=DEFAULT_DB_PATH, engine=None):
+def get_stats(since=None, db_path=DEFAULT_DB_PATH, engine=None,
+              include_flagged=False):
     """Aggregate stats: averages, uptime %, counts.
 
     Averages compare within the same engine: by default the latest
@@ -331,8 +485,11 @@ def get_stats(since=None, db_path=DEFAULT_DB_PATH, engine=None):
     group has fewer than 20 samples, all measurements are used so the
     numbers stay stable. ``engine="all"|"ookla"|"python"`` forces a
     selection. ``engine`` + ``sample_count`` report the group used.
+
+    Flagged rows are excluded unless ``include_flagged`` is set.
     """
-    measurements = get_measurements(since=since, db_path=db_path)
+    measurements = get_measurements(since=since, db_path=db_path,
+                                    include_flagged=include_flagged)
     outages = get_outages(since=since, db_path=db_path)
     if engine and engine != "all":
         if engine == "ookla":
@@ -345,9 +502,11 @@ def get_stats(since=None, db_path=DEFAULT_DB_PATH, engine=None):
                 m for m in measurements
                 if (m.get("engine") or "").lower().startswith("speedtest")
             ]
-    # Failed/partial transfers are not outages: exclude them from
-    # uptime and outage totals.
-    true_outages = [o for o in outages if o.get("type") != "failed_test"]
+    # Failed/partial transfers are not outages, and internal errors are
+    # not network events at all: exclude both from uptime and totals.
+    true_outages = [o for o in outages if o.get("type") == "outage"]
+    failed_tests = [o for o in outages if o.get("type") == "failed_test"]
+    internal_errors = [o for o in outages if o.get("type") == "internal_error"]
     total_cycles = len(measurements) + len(true_outages)
     uptime_pct = (
         (len(measurements) / total_cycles * 100) if total_cycles else None
@@ -374,7 +533,8 @@ def get_stats(since=None, db_path=DEFAULT_DB_PATH, engine=None):
     return {
         "measurement_count": len(measurements),
         "outage_count": len(true_outages),
-        "failed_test_count": len(outages) - len(true_outages),
+        "failed_test_count": len(failed_tests),
+        "internal_error_count": len(internal_errors),
         "uptime_pct": round(uptime_pct, 2) if uptime_pct is not None else None,
         "avg_download_mbps": avg("download_mbps", sample_rows),
         "avg_upload_mbps": avg("upload_mbps", sample_rows),

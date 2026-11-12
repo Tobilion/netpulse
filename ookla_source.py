@@ -18,7 +18,21 @@ from ookla_parse import (
     parse_ookla_line,
     result_to_final,
 )
-from sources_base import LiveDataSource, PartialTestError, PreStartError, watchdog_seconds
+from sources_base import (
+    LiveDataSource,
+    PartialTestError,
+    PreStartError,
+    RateLimitedError,
+    watchdog_seconds,
+)
+
+# Ookla's own words when it refuses to run. Detected explicitly so we can
+# apply a backoff instead of silently falling back to another engine.
+RATE_LIMIT_MARKERS = (
+    "limit reached",
+    "too many requests",
+    "rate limit",
+)
 
 WINGET_OOKLA_PATH = (
     r"C:\Users\tobil\AppData\Local\Microsoft\WinGet\Packages"
@@ -98,6 +112,14 @@ def kill_process_tree(proc):
             proc.kill()
         except Exception:
             pass
+
+
+def _is_rate_limited(detail):
+    """True when the CLI output shows a usage limit was hit."""
+    if not detail:
+        return False
+    low = detail.lower()
+    return any(marker in low for marker in RATE_LIMIT_MARKERS)
 
 
 class OoklaLiveSource(LiveDataSource):
@@ -267,6 +289,11 @@ class OoklaLiveSource(LiveDataSource):
                 raise PartialTestError(stall_reason, _partial())
             raise RuntimeError(stall_reason)
         if proc.returncode not in (0, None):
+            if _is_rate_limited(detail):
+                raise RateLimitedError(
+                    "Ookla CLI rate limit reached"
+                    + (f": {detail[-200:]}" if detail else "")
+                )
             if not seen_progress and final is None:
                 raise PreStartError(
                     f"Ookla CLI failed before start (rc={proc.returncode})"

@@ -7,6 +7,30 @@ class PreStartError(RuntimeError):
     """Source failed before any test progress was emitted."""
 
 
+class ForeignServerError(PreStartError):
+    """The only available server is outside the home country.
+
+    Measuring to another country measures that country, not this link, so
+    the cycle is skipped instead of storing a misleading row.
+    """
+
+
+class RateLimitedError(PreStartError):
+    """The engine refused to run because a usage limit was reached."""
+
+    def __init__(self, message, retry_after_seconds=None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class SkippedRun(Exception):
+    """The cycle was deliberately skipped (not a measurement, not an outage)."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class PartialTestError(RuntimeError):
     """Test failed after some progress; carries partial results."""
 
@@ -20,6 +44,28 @@ def watchdog_seconds(name, default):
         return int(os.environ.get(name, str(default)))
     except ValueError:
         return default
+
+
+def home_country():
+    """The country this connection is in; fallbacks must stay inside it."""
+    return (os.environ.get("NETPULSE_HOME_COUNTRY") or "Nigeria").strip().lower()
+
+
+def server_country(label):
+    """Country from a server label like 'Melbicom (Lagos, Nigeria)'."""
+    if not label or "(" not in label:
+        return None
+    inner = label[label.rfind("(") + 1: label.rfind(")")] if ")" in label else ""
+    parts = [p.strip() for p in inner.split(",")]
+    return parts[-1].lower() if parts and parts[-1] else None
+
+
+def server_is_local(label):
+    """True when a server is in the home country (so the path is realistic)."""
+    country = server_country(label)
+    if country is None:
+        return False
+    return country == home_country()
 
 
 class LiveDataSource:
