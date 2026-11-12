@@ -35,10 +35,12 @@ export function initTabs(onShow) {
     if (btn) showTab(btn.dataset.tabBtn);
   });
   window.addEventListener('hashchange', () => showTab(currentTab(), { push: false }));
-  showTab(currentTab(), { push: false });
+  // Register the listener BEFORE the first showTab so a remembered tab
+  // loads its content on page load.
   if (onShow) {
     window.addEventListener('netpulse:tab', (e) => onShow(e.detail));
   }
+  showTab(currentTab(), { push: false });
   document.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     const inField = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
